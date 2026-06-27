@@ -1,0 +1,30 @@
+name = "vault-cloudflare"
+compatibility_date = "2025-06-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Pages project – static assets are served from ./dist
+pages_build_output_dir = "./dist"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "vault-db"
+database_id = "placeholder-replace-after-wrangler-d1-create"
+migrations_dir = "drizzle/migrations"
+
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "vault-images"
+
+[vars]
+ENVIRONMENT = "development"
+
+# ---------------------------------------------------------------------------
+# Secrets (set via `wrangler secret put <NAME>`)
+# ---------------------------------------------------------------------------
+# SESSION_SECRET   – 32-byte random string for cookie signing
+# CAMERA_API_KEY   – shared secret between ESP32 and the Worker
+# ---------------------------------------------------------------------------
+
+[dev]
+port = 8788
+local_protocol = "http"
