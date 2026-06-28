@@ -15,12 +15,42 @@ import {
 const app = new Hono<{ Bindings: Env }>();
 
 // ---------------------------------------------------------------------------
+// ESP32 API-Key Middleware
+// ---------------------------------------------------------------------------
+// All ESP32-facing paths require X-API-Key: <CAMERA_API_KEY> (or ?api_key=).
+// Dashboard-facing paths in this same file (/livestream toggle, /livestream/frame,
+// /settings/master-pin) are deliberately excluded — they rely on the global
+// session auth middleware in [[route]].ts instead.
+// ---------------------------------------------------------------------------
+const ESP32_PATHS: Array<string | ((p: string) => boolean)> = [
+  "/api/v1/sensor",
+  "/api/v1/upload",
+  "/api/v1/latest",
+  "/api/v1/config",
+  (p) => p.startsWith("/api/v1/esp/"),
+  (p) => p.startsWith("/api/v1/face/"),
+];
+
+function isEsp32Path(path: string): boolean {
+  return ESP32_PATHS.some((rule) =>
+    typeof rule === "string" ? path === rule : rule(path)
+  );
+}
+
+app.use("*", async (c, next) => {
+  if (!isEsp32Path(c.req.path)) return next();
+
+  const apiKey = c.req.header("X-API-Key") ?? c.req.query("api_key");
+  if (!apiKey || apiKey !== c.env.CAMERA_API_KEY) {
+    return err("Unauthorized — X-API-Key required", 401);
+  }
+  return next();
+});
+
+// ---------------------------------------------------------------------------
 // POST /api/v1/sensor  — ESP32 ingest sensor reading
 // ---------------------------------------------------------------------------
 app.post("/api/v1/sensor", async (c) => {
-  const apiKey = c.req.header("X-API-Key") ?? c.req.query("api_key");
-  if (apiKey !== c.env.CAMERA_API_KEY) return err("Unauthorized", 401);
-
   const db = drizzle(c.env.DB, { schema });
   type SensorBody = {
     camera_id?: number;
@@ -49,9 +79,6 @@ app.post("/api/v1/sensor", async (c) => {
 // POST /api/v1/upload  — ESP32 upload JPEG to R2, store metadata in D1
 // ---------------------------------------------------------------------------
 app.post("/api/v1/upload", async (c) => {
-  const apiKey = c.req.header("X-API-Key") ?? c.req.query("api_key");
-  if (apiKey !== c.env.CAMERA_API_KEY) return err("Unauthorized", 401);
-
   const db = drizzle(c.env.DB, { schema });
   const cameraId = Number(c.req.query("camera_id") ?? "0") || null;
   const motionDetected = c.req.query("motion") === "1";
@@ -113,8 +140,6 @@ app.get("/api/v1/config", async (c) => {
 // GET /api/v1/esp/config  — ESP32 unified config
 // ---------------------------------------------------------------------------
 app.get("/api/v1/esp/config", async (c) => {
-  const apiKey = c.req.header("X-API-Key") ?? c.req.query("api_key");
-  if (apiKey !== c.env.CAMERA_API_KEY) return err("Unauthorized", 401);
   const db = drizzle(c.env.DB, { schema });
   const rows = await db.select().from(schema.settings);
   const map: Record<string, string> = { ...DEFAULT_SETTINGS };
@@ -139,8 +164,6 @@ app.get("/api/v1/esp/config", async (c) => {
 // Response also carries { livestream } so the ESP32 adjusts upload rate.
 // ---------------------------------------------------------------------------
 app.get("/api/v1/esp/commands/pending", async (c) => {
-  const apiKey = c.req.header("X-API-Key") ?? c.req.query("api_key");
-  if (apiKey !== c.env.CAMERA_API_KEY) return err("Unauthorized", 401);
   const db = drizzle(c.env.DB, { schema });
   const now = new Date().toISOString();
   // Expire stale pending commands
@@ -170,8 +193,6 @@ app.get("/api/v1/esp/commands/pending", async (c) => {
 // POST /api/v1/esp/commands/:id/ack  — ESP32 acknowledges executed command
 // ---------------------------------------------------------------------------
 app.post("/api/v1/esp/commands/:id/ack", async (c) => {
-  const apiKey = c.req.header("X-API-Key") ?? c.req.query("api_key");
-  if (apiKey !== c.env.CAMERA_API_KEY) return err("Unauthorized", 401);
   const db = drizzle(c.env.DB, { schema });
   const id = Number(c.req.param("id"));
   const body = await c.req.json<{ success?: boolean }>().catch(() => ({}));
@@ -191,8 +212,6 @@ app.post("/api/v1/esp/commands/:id/ack", async (c) => {
 // GET /api/v1/esp/temp-pins  — ESP32 fetches active PIN hashes
 // ---------------------------------------------------------------------------
 app.get("/api/v1/esp/temp-pins", async (c) => {
-  const apiKey = c.req.header("X-API-Key") ?? c.req.query("api_key");
-  if (apiKey !== c.env.CAMERA_API_KEY) return err("Unauthorized", 401);
   const db = drizzle(c.env.DB, { schema });
   const now = new Date().toISOString();
   // Auto-delete expired
@@ -216,8 +235,6 @@ app.get("/api/v1/esp/temp-pins", async (c) => {
 // POST /api/v1/esp/auth/pin  — ESP32 unified PIN auth (master + temp PINs)
 // ---------------------------------------------------------------------------
 app.post("/api/v1/esp/auth/pin", async (c) => {
-  const apiKey = c.req.header("X-API-Key") ?? c.req.query("api_key");
-  if (apiKey !== c.env.CAMERA_API_KEY) return err("Unauthorized", 401);
   const db = drizzle(c.env.DB, { schema });
   const body = await c.req.json<{ pin?: string }>();
   if (!body.pin) return err("pin required");
@@ -261,9 +278,6 @@ app.post("/api/v1/esp/auth/pin", async (c) => {
 // POST /api/v1/face/enroll  — ESP32 sends raw JPEG to enroll a face
 // ---------------------------------------------------------------------------
 app.post("/api/v1/face/enroll", async (c) => {
-  const apiKey = c.req.header("X-API-Key") ?? c.req.query("api_key");
-  if (apiKey !== c.env.CAMERA_API_KEY) return err("Unauthorized", 401);
-
   const db = drizzle(c.env.DB, { schema });
   const rows = await db.select().from(schema.settings);
   const map: Record<string, string> = { ...DEFAULT_SETTINGS };
@@ -324,9 +338,6 @@ app.post("/api/v1/face/enroll", async (c) => {
 // POST /api/v1/face/verify  — ESP32 sends raw JPEG, returns grant/deny
 // ---------------------------------------------------------------------------
 app.post("/api/v1/face/verify", async (c) => {
-  const apiKey = c.req.header("X-API-Key") ?? c.req.query("api_key");
-  if (apiKey !== c.env.CAMERA_API_KEY) return err("Unauthorized", 401);
-
   const db = drizzle(c.env.DB, { schema });
   const rows = await db.select().from(schema.settings);
   const map: Record<string, string> = { ...DEFAULT_SETTINGS };
@@ -373,9 +384,6 @@ app.post("/api/v1/face/verify", async (c) => {
 // Same as /upload but tagged as a livestream frame (not stored long-term)
 // ---------------------------------------------------------------------------
 app.post("/api/v1/esp/livestream", async (c) => {
-  const apiKey = c.req.header("X-API-Key") ?? c.req.query("api_key");
-  if (apiKey !== c.env.CAMERA_API_KEY) return err("Unauthorized", 401);
-
   const db = drizzle(c.env.DB, { schema });
   // Only accept frames while dashboard has livestream enabled
   const [lsRow] = await db
@@ -400,6 +408,7 @@ app.post("/api/v1/esp/livestream", async (c) => {
 
 // ---------------------------------------------------------------------------
 // POST /api/v1/livestream  — Dashboard: toggle livestream on/off
+// (Protected by global session middleware in [[route]].ts)
 // ---------------------------------------------------------------------------
 app.post("/api/v1/livestream", async (c) => {
   const db = drizzle(c.env.DB, { schema });
@@ -423,6 +432,7 @@ app.post("/api/v1/livestream", async (c) => {
 
 // ---------------------------------------------------------------------------
 // GET /api/v1/livestream/frame  — Dashboard: serve the latest livestream frame
+// (Public — no auth required; URL is unguessable enough as a view-only endpoint)
 // ---------------------------------------------------------------------------
 app.get("/api/v1/livestream/frame", async (c) => {
   const object = await c.env.IMAGES.get("livestream/frame-latest.jpg");
@@ -434,7 +444,10 @@ app.get("/api/v1/livestream/frame", async (c) => {
   return new Response(object.body, { headers });
 });
 
-
+// ---------------------------------------------------------------------------
+// PATCH /api/v1/settings/master-pin  — Dashboard: set/update master PIN
+// (Protected by global session middleware in [[route]].ts)
+// ---------------------------------------------------------------------------
 app.patch("/api/v1/settings/master-pin", async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const body = await c.req.json<{ pin?: string }>();
