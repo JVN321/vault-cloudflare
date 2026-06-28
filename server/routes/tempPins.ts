@@ -1,31 +1,31 @@
 import { Hono } from "hono";
-import { eq, desc, and, gt, lt } from "drizzle-orm";
+import { eq, desc, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "../../drizzle/schema";
 import { Env } from "../types";
-import { ok, err, hashPassword, verifyPassword, sha256Hex, arrayBufferToBase64, facePlusPlus, DEFAULT_SETTINGS, parseSettings } from "../utils/helpers";
+import { ok, err, sha256Hex } from "../utils/helpers";
 
 const app = new Hono<{ Bindings: Env }>();
 
-
-// Temporary PINs – Dashboard
-
+// ---------------------------------------------------------------------------
+// GET /api/v1/temp-pins  — Dashboard: list active temp PINs (no hash exposed)
+// ---------------------------------------------------------------------------
 app.get("/api/v1/temp-pins", async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const now = new Date().toISOString();
   // Auto-delete expired pins
-  await db
-    .delete(schema.tempPins)
-    .where(lt(schema.tempPins.expiresAt, now));
-
+  await db.delete(schema.tempPins).where(lt(schema.tempPins.expiresAt, now));
   const rows = await db
     .select()
     .from(schema.tempPins)
     .orderBy(desc(schema.tempPins.createdAt));
-  // never expose the hash to the dashboard, but now we return the plain pin
+  // Never expose the SHA-256 hash to the dashboard
   return ok(rows.map(({ pinSha256: _h, ...r }) => r));
 });
 
+// ---------------------------------------------------------------------------
+// POST /api/v1/temp-pins  — Dashboard: create a new temp PIN
+// ---------------------------------------------------------------------------
 app.post("/api/v1/temp-pins", async (c) => {
   const db = drizzle(c.env.DB, { schema });
   type Body = { pin: string; label?: string; expiresAt: string; maxUses?: number };
@@ -46,20 +46,23 @@ app.post("/api/v1/temp-pins", async (c) => {
   return ok({ ...row, pinSha256: undefined });
 });
 
+// ---------------------------------------------------------------------------
+// DELETE /api/v1/temp-pins/:id  — Dashboard: revoke a specific temp PIN
+// ---------------------------------------------------------------------------
 app.delete("/api/v1/temp-pins/:id", async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const id = Number(c.req.param("id"));
-  await db
-    .delete(schema.tempPins)
-    .where(eq(schema.tempPins.id, id));
+  await db.delete(schema.tempPins).where(eq(schema.tempPins.id, id));
   return ok(null);
 });
 
+// ---------------------------------------------------------------------------
+// DELETE /api/v1/temp-pins  — Dashboard: revoke all temp PINs
+// ---------------------------------------------------------------------------
 app.delete("/api/v1/temp-pins", async (c) => {
   const db = drizzle(c.env.DB, { schema });
   await db.delete(schema.tempPins);
   return ok(null);
 });
-
 
 export default app;

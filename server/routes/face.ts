@@ -1,13 +1,13 @@
 import { Hono } from "hono";
-import { eq, desc, and, gt, lt } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
-import * as schema from "../../drizzle/schema";
 import { Env } from "../types";
-import { ok, err, hashPassword, verifyPassword, sha256Hex, arrayBufferToBase64, facePlusPlus, DEFAULT_SETTINGS, parseSettings } from "../utils/helpers";
 
 const app = new Hono<{ Bindings: Env }>();
 
-
-// Face Recognition (Face++ API proxy)
+// Face recognition routes are handled in esp.ts (require CAMERA_API_KEY):
+//   POST /api/v1/face/enroll
+//   POST /api/v1/face/verify
+//
+// Dashboard-side face enrollment (from R2 image) is in users.ts:
+//   POST /api/v1/users/enroll-face
 
 export default app;
