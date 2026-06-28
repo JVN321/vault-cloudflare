@@ -6,3 +6,4 @@ dist/
 *.local
 .dev.vars
 .tanstack/
+test_face.jpg

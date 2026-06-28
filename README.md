@@ -113,6 +113,9 @@ pnpm db:migrate
 
 # Apply to production
 pnpm db:migrate:prod
+
+# View and manage local database using Drizzle Studio
+pnpm db:studio
 ```
 
 ---

@@ -10,6 +10,7 @@ import {
   Shield,
   LogOut,
   ChevronsLeft,
+  ImageIcon,
 } from "lucide-react";
 import {
   Sidebar,
@@ -29,10 +30,10 @@ import { cn } from "@/lib/utils";
 const nav = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/users", label: "Users", icon: Users },
-  { to: "/device-settings", label: "Device Settings", icon: Cpu },
   { to: "/analytics", label: "Analytics", icon: BarChart3 },
   { to: "/access-logs", label: "Access Logs", icon: ScrollText },
-  { to: "/temporary-codes", label: "Temporary Codes", icon: KeyRound },
+  { to: "/images", label: "Images", icon: ImageIcon },
+  { to: "/temporary-codes", label: "Temporary PINs", icon: KeyRound },
   { to: "/settings", label: "Settings", icon: Settings },
 ] as const;
 

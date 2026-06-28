@@ -6,7 +6,7 @@ import type {
   SensorData,
   ImageMeta,
   SystemConfig,
-  TempCode,
+  TempPin,
 } from "./types";
 
 const BASE = "/api";
@@ -41,9 +41,9 @@ export const authApi = {
   me: () => request<{ user: VaultUser }>("/v1/auth/me"),
 
   updatePin: (currentPin: string, newPin: string) =>
-    request<void>("/v1/auth/pin", {
+    request<void>("/v1/settings/master-pin", {
       method: "PATCH",
-      body: JSON.stringify({ currentPin, newPin }),
+      body: JSON.stringify({ pin: newPin }),
     }),
 };
 
@@ -59,6 +59,12 @@ export const usersApi = {
     request<VaultUser>("/v1/users", {
       method: "POST",
       body: JSON.stringify(data),
+    }),
+
+  enrollFace: (name: string, objectKey: string) =>
+    request<VaultUser>("/v1/users/enroll-face", {
+      method: "POST",
+      body: JSON.stringify({ name, objectKey }),
     }),
 
   update: (id: number, data: Partial<VaultUser>) =>
@@ -115,30 +121,37 @@ export const settingsApi = {
 // ---------------------------------------------------------------------------
 // Temporary codes
 // ---------------------------------------------------------------------------
-export const tempCodesApi = {
-  list: () => request<TempCode[]>("/v1/temp-codes"),
+export const tempPinsApi = {
+  list: () => request<TempPin[]>("/v1/temp-pins"),
   create: (data: {
-    location: string;
-    accessType: string;
-    validFrom: string;
+    pin: string;
+    label?: string;
     expiresAt: string;
-    notes?: string;
+    maxUses?: number;
   }) =>
-    request<TempCode>("/v1/temp-codes", {
+    request<TempPin>("/v1/temp-pins", {
       method: "POST",
       body: JSON.stringify(data),
     }),
   revoke: (id: number) =>
-    request<void>(`/v1/temp-codes/${id}`, { method: "DELETE" }),
+    request<null>(`/v1/temp-pins/${id}`, { method: "DELETE" }),
+  revokeAll: () =>
+    request<null>("/v1/temp-pins", { method: "DELETE" }),
 };
+
 
 // ---------------------------------------------------------------------------
 // Images (ESP32 camera feed)
 // ---------------------------------------------------------------------------
 export const imagesApi = {
-  list: (limit = 20) => request<ImageMeta[]>(`/v1/images?limit=${limit}`),
+  list: (limit = 50, motionOnly = false) =>
+    request<ImageMeta[]>(`/v1/images?limit=${limit}${motionOnly ? "&motion=1" : ""}`),
   latest: () => request<ImageMeta | null>("/v1/images/latest"),
   getUrl: (objectKey: string) => `${BASE}/v1/images/serve/${encodeURIComponent(objectKey)}`,
+  getDownloadUrl: (objectKey: string) =>
+    `${BASE}/v1/images/serve/${encodeURIComponent(objectKey)}?download=1`,
+  delete: (id: number) => request<void>(`/v1/images/${id}`, { method: "DELETE" }),
+  cleanup: () => request<{ deleted: number; cutoff: string }>("/v1/images/cleanup", { method: "POST" }),
 };
 
 // ---------------------------------------------------------------------------
@@ -147,3 +160,15 @@ export const imagesApi = {
 export const sensorApi = {
   latest: () => request<SensorData | null>("/v1/sensor/latest"),
 };
+
+// ---------------------------------------------------------------------------
+// Hardware Commands
+// ---------------------------------------------------------------------------
+export const commandsApi = {
+  send: (type: "LOCK" | "UNLOCK" | "PULSE") =>
+    request<{ id: number }>("/v1/commands", {
+      method: "POST",
+      body: JSON.stringify({ type }),
+    }),
+};
+

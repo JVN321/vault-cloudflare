@@ -7,7 +7,7 @@ export type AuthMethod = "FACE" | "PIN" | "QR" | "BARCODE" | "RFID" | "TEMP_CODE
 export type UserRole = "ADMIN" | "MANAGER" | "EMPLOYEE" | "VISITOR";
 export type UserStatus = "ACTIVE" | "SUSPENDED" | "INACTIVE";
 export type AccessAction = "ENTRY" | "EXIT";
-export type TempCodeStatus = "ACTIVE" | "USED" | "EXPIRED";
+export type TempPinStatus = "ACTIVE" | "USED" | "EXPIRED";
 
 // Frontend display types (mirrors DB types but with friendlier field names)
 export interface VaultUser {
@@ -47,27 +47,35 @@ export interface ImageMeta {
   objectKey: string;
   timestamp: string;
   motionDetected: boolean;
+  fileSize: number | null;
+  mimeType: string | null;
 }
 
 export interface SystemConfig {
   allowFaceAuth: boolean;
   allowPinAuth: boolean;
-  allowQrAuth: boolean;
   allowBarcodeAuth: boolean;
   allowRfidAuth: boolean;
   failedAttemptLimit: number;
   autoLockSeconds: number;
   realtimeAlerts: boolean;
   motionDetection: boolean;
+  wifiSsid?: string;
+  wifiPassword?: string;
+  deviceIp?: string;
+  faceplusplusApiKey?: string;
+  faceplusplusApiSecret?: string;
+  faceplusplusFaceset?: string;
+  faceConfidenceThreshold?: number;
 }
 
-export interface TempCode {
+export interface TempPin {
   id: number;
-  code: string;
-  location: string;
-  accessType: string;
-  validFrom: string;
+  pin: string | null;
+  label: string | null;
   expiresAt: string;
-  status: TempCodeStatus;
-  notes: string | null;
+  maxUses: number;
+  useCount: number;
+  status: TempPinStatus;
+  createdAt: string;
 }

@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Search, Plus, MoreHorizontal, Trash2, Save, Loader2 } from "lucide-react";
+import { Search, Plus, MoreHorizontal, Trash2, Save, Loader2, Image as ImageIcon } from "lucide-react";
 import { TopBar } from "@/components/vault/top-bar";
 import { StatusPill, Avatar } from "@/components/vault/status-pill";
 import { Button } from "@/components/ui/button";
@@ -10,8 +10,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { usersApi } from "@/lib/api";
+import { usersApi, imagesApi } from "@/lib/api";
 import type { VaultUser, AuthMethod } from "@/lib/types";
 import { toast } from "sonner";
 
@@ -21,17 +22,108 @@ export const Route = createFileRoute("/_authenticated/users")({
 });
 
 const methodLabels: Record<string, string> = {
-  QR: "QR",
   FACE: "Face",
   PIN: "PIN",
   BARCODE: "Barcode",
   RFID: "RFID",
 };
 
+function AddUserDialog({ open, onOpenChange }: { open: boolean, onOpenChange: (b: boolean) => void }) {
+  const qc = useQueryClient();
+  const [name, setName] = useState("");
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+
+  const { data: recentImages = [], isLoading: imagesLoading } = useQuery({
+    queryKey: ["recent-images-enroll"],
+    queryFn: () => imagesApi.list(10, false),
+    enabled: open,
+  });
+
+  const enrollMutation = useMutation({
+    mutationFn: () => usersApi.enrollFace(name, selectedImage!),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["users"] });
+      toast.success("User enrolled successfully!");
+      onOpenChange(false);
+      setName("");
+      setSelectedImage(null);
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Enrollment failed"),
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[500px]">
+        <DialogHeader>
+          <DialogTitle>Enroll New User</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-6 pt-4">
+          <label className="block space-y-1.5">
+            <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">User Full Name</span>
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Jane Doe"
+              className="h-10"
+            />
+          </label>
+          
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Select Recent Camera Image</span>
+              <Button variant="ghost" size="sm" className="h-6 text-xs px-2" onClick={() => qc.invalidateQueries({queryKey: ["recent-images-enroll"]})}>Refresh</Button>
+            </div>
+            
+            {imagesLoading ? (
+              <div className="flex justify-center p-4"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+            ) : recentImages.length === 0 ? (
+              <div className="rounded-lg border border-border border-dashed p-6 text-center text-sm text-muted-foreground">
+                <ImageIcon className="mx-auto mb-2 h-6 w-6 opacity-40" />
+                No recent images. Ask the user to stand in front of the camera.
+              </div>
+            ) : (
+              <div className="grid grid-cols-5 gap-2 max-h-[200px] overflow-y-auto pr-1">
+                {recentImages.map((img) => (
+                  <div
+                    key={img.objectKey}
+                    onClick={() => setSelectedImage(img.objectKey)}
+                    className={`relative cursor-pointer overflow-hidden rounded-md border-2 transition-all ${selectedImage === img.objectKey ? "border-primary shadow-sm" : "border-transparent opacity-70 hover:opacity-100"}`}
+                  >
+                    <div className="aspect-square bg-muted">
+                      <img src={imagesApi.getUrl(img.objectKey)} alt="Capture" className="h-full w-full object-cover" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          
+          <div className="rounded-lg border border-warning/20 bg-warning/10 p-3 text-xs text-warning-foreground">
+            <strong>Note:</strong> The new user will be created with "INACTIVE" status by default for security. You can enable their access from the user list.
+          </div>
+
+          <div className="flex justify-end gap-3 pt-4">
+            <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button 
+              disabled={!name || !selectedImage || enrollMutation.isPending}
+              onClick={() => enrollMutation.mutate()}
+              className="gap-2"
+            >
+              {enrollMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+              Enroll Face
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function UsersPage() {
   const qc = useQueryClient();
   const [selected, setSelected] = useState<VaultUser | null>(null);
   const [query, setQuery] = useState("");
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
 
   const { data: users = [], isLoading } = useQuery({
     queryKey: ["users"],
@@ -60,13 +152,8 @@ function UsersPage() {
   });
 
   const accessMutation = useMutation({
-    mutationFn: ({
-      id,
-      data,
-    }: {
-      id: number;
-      data: { allowedAuthMethods?: AuthMethod[] };
-    }) => usersApi.updateAccess(id, data),
+    mutationFn: ({ id, data }: { id: number; data: { allowedAuthMethods?: AuthMethod[], status?: string } }) => 
+      usersApi.updateAccess(id, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["users"] });
       toast.success("Access updated");
@@ -112,10 +199,12 @@ function UsersPage() {
               <SelectItem value="SUSPENDED">Suspended</SelectItem>
             </SelectContent>
           </Select>
-          <Button className="h-10 gap-2">
+          <Button className="h-10 gap-2" onClick={() => setAddDialogOpen(true)}>
             <Plus className="h-4 w-4" /> Add User
           </Button>
         </div>
+
+        <AddUserDialog open={addDialogOpen} onOpenChange={setAddDialogOpen} />
 
         <div className="overflow-hidden rounded-xl border border-border bg-card">
           {isLoading ? (
@@ -130,7 +219,6 @@ function UsersPage() {
                   <TableHead>User</TableHead>
                   <TableHead>Role</TableHead>
                   <TableHead>Department</TableHead>
-                  <TableHead className="text-center">QR</TableHead>
                   <TableHead className="text-center">Face</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="w-10"></TableHead>
@@ -138,7 +226,6 @@ function UsersPage() {
               </TableHeader>
               <TableBody>
                 {filtered.map((u) => {
-                  const hasQr = u.allowedAuthMethods.includes("QR");
                   const hasFace = u.allowedAuthMethods.includes("FACE");
                   return (
                     <TableRow
@@ -160,9 +247,6 @@ function UsersPage() {
                       </TableCell>
                       <TableCell><span className="text-sm">{u.role}</span></TableCell>
                       <TableCell className="text-sm text-muted-foreground">{u.department ?? "—"}</TableCell>
-                      <TableCell className="text-center">
-                        <span className={`inline-block h-2 w-2 rounded-full ${hasQr ? "bg-success" : "bg-muted-foreground/30"}`} />
-                      </TableCell>
                       <TableCell className="text-center">
                         <span className={`inline-block h-2 w-2 rounded-full ${hasFace ? "bg-success" : "bg-muted-foreground/30"}`} />
                       </TableCell>
@@ -187,7 +271,7 @@ function UsersPage() {
                 })}
                 {filtered.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={8} className="py-8 text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">
                       No users found.
                     </TableCell>
                   </TableRow>
@@ -222,10 +306,32 @@ function UsersPage() {
 
                 <div>
                   <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Account Status
+                  </h3>
+                  <div className="rounded-lg border border-border bg-muted/40 p-4 flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-medium">Active Access</div>
+                      <div className="text-xs text-muted-foreground">Turn off to revoke facility access</div>
+                    </div>
+                    <Switch
+                      checked={selected.status === "ACTIVE"}
+                      onCheckedChange={(v) => {
+                        accessMutation.mutate({
+                          id: selected.id,
+                          data: { status: v ? "ACTIVE" : "INACTIVE" },
+                        });
+                        setSelected({ ...selected, status: v ? "ACTIVE" : "INACTIVE" });
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                     Access Permissions
                   </h3>
                   <div className="space-y-3 rounded-lg border border-border bg-muted/40 p-4">
-                    {(["QR", "FACE"] as AuthMethod[]).map((m) => (
+                    {(["FACE", "PIN"] as AuthMethod[]).map((m) => (
                       <div key={m} className="flex items-center justify-between">
                         <div>
                           <div className="text-sm font-medium">{methodLabels[m]} Authentication</div>

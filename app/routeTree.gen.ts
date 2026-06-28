@@ -14,7 +14,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedUsersRouteImport } from './routes/_authenticated.users'
 import { Route as AuthenticatedTemporaryCodesRouteImport } from './routes/_authenticated.temporary-codes'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated.settings'
-import { Route as AuthenticatedDeviceSettingsRouteImport } from './routes/_authenticated.device-settings'
+import { Route as AuthenticatedImagesRouteImport } from './routes/_authenticated.images'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated.dashboard'
 import { Route as AuthenticatedAnalyticsRouteImport } from './routes/_authenticated.analytics'
 import { Route as AuthenticatedAccessLogsRouteImport } from './routes/_authenticated.access-logs'
@@ -44,12 +44,11 @@ const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
-const AuthenticatedDeviceSettingsRoute =
-  AuthenticatedDeviceSettingsRouteImport.update({
-    id: '/device-settings',
-    path: '/device-settings',
-    getParentRoute: () => AuthenticatedRoute,
-  } as any)
+const AuthenticatedImagesRoute = AuthenticatedImagesRouteImport.update({
+  id: '/images',
+  path: '/images',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
 const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -71,7 +70,7 @@ export interface FileRoutesByFullPath {
   '/access-logs': typeof AuthenticatedAccessLogsRoute
   '/analytics': typeof AuthenticatedAnalyticsRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
-  '/device-settings': typeof AuthenticatedDeviceSettingsRoute
+  '/images': typeof AuthenticatedImagesRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/temporary-codes': typeof AuthenticatedTemporaryCodesRoute
   '/users': typeof AuthenticatedUsersRoute
@@ -81,7 +80,7 @@ export interface FileRoutesByTo {
   '/access-logs': typeof AuthenticatedAccessLogsRoute
   '/analytics': typeof AuthenticatedAnalyticsRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
-  '/device-settings': typeof AuthenticatedDeviceSettingsRoute
+  '/images': typeof AuthenticatedImagesRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/temporary-codes': typeof AuthenticatedTemporaryCodesRoute
   '/users': typeof AuthenticatedUsersRoute
@@ -93,7 +92,7 @@ export interface FileRoutesById {
   '/_authenticated/access-logs': typeof AuthenticatedAccessLogsRoute
   '/_authenticated/analytics': typeof AuthenticatedAnalyticsRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
-  '/_authenticated/device-settings': typeof AuthenticatedDeviceSettingsRoute
+  '/_authenticated/images': typeof AuthenticatedImagesRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/temporary-codes': typeof AuthenticatedTemporaryCodesRoute
   '/_authenticated/users': typeof AuthenticatedUsersRoute
@@ -105,7 +104,7 @@ export interface FileRouteTypes {
     | '/access-logs'
     | '/analytics'
     | '/dashboard'
-    | '/device-settings'
+    | '/images'
     | '/settings'
     | '/temporary-codes'
     | '/users'
@@ -115,7 +114,7 @@ export interface FileRouteTypes {
     | '/access-logs'
     | '/analytics'
     | '/dashboard'
-    | '/device-settings'
+    | '/images'
     | '/settings'
     | '/temporary-codes'
     | '/users'
@@ -126,7 +125,7 @@ export interface FileRouteTypes {
     | '/_authenticated/access-logs'
     | '/_authenticated/analytics'
     | '/_authenticated/dashboard'
-    | '/_authenticated/device-settings'
+    | '/_authenticated/images'
     | '/_authenticated/settings'
     | '/_authenticated/temporary-codes'
     | '/_authenticated/users'
@@ -174,11 +173,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSettingsRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
-    '/_authenticated/device-settings': {
-      id: '/_authenticated/device-settings'
-      path: '/device-settings'
-      fullPath: '/device-settings'
-      preLoaderRoute: typeof AuthenticatedDeviceSettingsRouteImport
+    '/_authenticated/images': {
+      id: '/_authenticated/images'
+      path: '/images'
+      fullPath: '/images'
+      preLoaderRoute: typeof AuthenticatedImagesRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/dashboard': {
@@ -209,7 +208,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedAccessLogsRoute: typeof AuthenticatedAccessLogsRoute
   AuthenticatedAnalyticsRoute: typeof AuthenticatedAnalyticsRoute
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
-  AuthenticatedDeviceSettingsRoute: typeof AuthenticatedDeviceSettingsRoute
+  AuthenticatedImagesRoute: typeof AuthenticatedImagesRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
   AuthenticatedTemporaryCodesRoute: typeof AuthenticatedTemporaryCodesRoute
   AuthenticatedUsersRoute: typeof AuthenticatedUsersRoute
@@ -219,7 +218,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedAccessLogsRoute: AuthenticatedAccessLogsRoute,
   AuthenticatedAnalyticsRoute: AuthenticatedAnalyticsRoute,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
-  AuthenticatedDeviceSettingsRoute: AuthenticatedDeviceSettingsRoute,
+  AuthenticatedImagesRoute: AuthenticatedImagesRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
   AuthenticatedTemporaryCodesRoute: AuthenticatedTemporaryCodesRoute,
   AuthenticatedUsersRoute: AuthenticatedUsersRoute,

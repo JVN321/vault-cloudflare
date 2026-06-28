@@ -36,29 +36,10 @@ export const credentials = sqliteTable("credentials", {
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
   credentialType: text("credential_type", {
-    enum: ["FACE", "PIN", "QR", "BARCODE", "RFID"],
+    enum: ["FACE", "PIN", "BARCODE", "RFID"],
   }).notNull(),
   credentialValue: text("credential_value").notNull(),
   active: integer("active", { mode: "boolean" }).notNull().default(true),
-  createdAt: text("created_at")
-    .notNull()
-    .default(sql`(datetime('now'))`),
-});
-
-// ---------------------------------------------------------------------------
-// Temporary access codes
-// ---------------------------------------------------------------------------
-export const temporaryCodes = sqliteTable("temporary_codes", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  code: text("code").notNull().unique(),
-  location: text("location").notNull(),
-  accessType: text("access_type").notNull(),
-  validFrom: text("valid_from").notNull(),
-  expiresAt: text("expires_at").notNull(),
-  status: text("status", { enum: ["ACTIVE", "USED", "EXPIRED"] })
-    .notNull()
-    .default("ACTIVE"),
-  notes: text("notes"),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(datetime('now'))`),
@@ -123,7 +104,7 @@ export const accessLogs = sqliteTable("access_logs", {
     onDelete: "set null",
   }),
   method: text("method", {
-    enum: ["FACE", "PIN", "QR", "BARCODE", "RFID", "TEMP_CODE"],
+    enum: ["FACE", "PIN", "BARCODE", "RFID", "TEMP_CODE"],
   }).notNull(),
   success: integer("success", { mode: "boolean" }).notNull(),
   location: text("location"),
@@ -184,6 +165,40 @@ export const systemLogs = sqliteTable("system_logs", {
 });
 
 // ---------------------------------------------------------------------------
+// Commands (lock / unlock / pulse — queued for ESP32)
+// ---------------------------------------------------------------------------
+export const commands = sqliteTable("commands", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  type: text("type", { enum: ["LOCK", "UNLOCK", "PULSE"] }).notNull(),
+  status: text("status", { enum: ["PENDING", "EXECUTED", "EXPIRED", "FAILED"] })
+    .notNull()
+    .default("PENDING"),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  executedAt: text("executed_at"),
+  expiresAt: text("expires_at").notNull(),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+});
+
+// ---------------------------------------------------------------------------
+// Temporary PINs (short-lived numeric PINs, SHA-256 hashed)
+// ---------------------------------------------------------------------------
+export const tempPins = sqliteTable("temp_pins", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  pin: text("pin"),
+  pinSha256: text("pin_sha256").notNull(),
+  label: text("label"),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  validFrom: text("valid_from").notNull().default(sql`(datetime('now'))`),
+  expiresAt: text("expires_at").notNull(),
+  status: text("status", { enum: ["ACTIVE", "USED", "REVOKED", "EXPIRED"] })
+    .notNull()
+    .default("ACTIVE"),
+  maxUses: integer("max_uses").notNull().default(1),
+  useCount: integer("use_count").notNull().default(0),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+});
+
+// ---------------------------------------------------------------------------
 // Auth sessions (cookie-based, stored server-side)
 // ---------------------------------------------------------------------------
 export const sessions = sqliteTable("sessions", {
@@ -213,4 +228,7 @@ export type NewAccessLog = typeof accessLogs.$inferInsert;
 export type SecurityEvent = typeof securityEvents.$inferSelect;
 export type Setting = typeof settings.$inferSelect;
 export type Session = typeof sessions.$inferSelect;
-export type TemporaryCode = typeof temporaryCodes.$inferSelect;
+export type Command = typeof commands.$inferSelect;
+export type NewCommand = typeof commands.$inferInsert;
+export type TempPin = typeof tempPins.$inferSelect;
+export type NewTempPin = typeof tempPins.$inferInsert;
