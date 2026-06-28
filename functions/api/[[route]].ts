@@ -49,7 +49,9 @@ function isPublicPath(path: string): boolean {
     path === "/api/v1/latest" ||
     path === "/api/v1/config" ||
     // Image serving is public (URLs are opaque R2 keys)
-    path.startsWith("/api/v1/images/serve/")
+    path.startsWith("/api/v1/images/serve/") ||
+    // Livestream frame served without session (image URL embedded in <img> tag)
+    path === "/api/v1/livestream/frame"
   );
 }
 

@@ -136,6 +136,7 @@ app.get("/api/v1/esp/config", async (c) => {
 
 // ---------------------------------------------------------------------------
 // GET /api/v1/esp/commands/pending  — ESP32 polls for queued commands
+// Response also carries { livestream } so the ESP32 adjusts upload rate.
 // ---------------------------------------------------------------------------
 app.get("/api/v1/esp/commands/pending", async (c) => {
   const apiKey = c.req.header("X-API-Key") ?? c.req.query("api_key");
@@ -153,7 +154,16 @@ app.get("/api/v1/esp/commands/pending", async (c) => {
     .where(and(eq(schema.commands.status, "PENDING"), gt(schema.commands.expiresAt, now)))
     .orderBy(schema.commands.createdAt)
     .limit(1);
-  return ok(cmd ?? null);
+
+  // Read current livestream flag from settings
+  const [lsRow] = await db
+    .select()
+    .from(schema.settings)
+    .where(eq(schema.settings.key, "livestream_active"))
+    .limit(1);
+  const livestream = lsRow?.value === "true";
+
+  return ok({ command: cmd ?? null, livestream });
 });
 
 // ---------------------------------------------------------------------------
@@ -359,8 +369,72 @@ app.post("/api/v1/face/verify", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// PATCH /api/v1/settings/master-pin  — Dashboard: set/update master PIN
+// POST /api/v1/esp/livestream  — ESP32 uploads a livestream frame
+// Same as /upload but tagged as a livestream frame (not stored long-term)
 // ---------------------------------------------------------------------------
+app.post("/api/v1/esp/livestream", async (c) => {
+  const apiKey = c.req.header("X-API-Key") ?? c.req.query("api_key");
+  if (apiKey !== c.env.CAMERA_API_KEY) return err("Unauthorized", 401);
+
+  const db = drizzle(c.env.DB, { schema });
+  // Only accept frames while dashboard has livestream enabled
+  const [lsRow] = await db
+    .select()
+    .from(schema.settings)
+    .where(eq(schema.settings.key, "livestream_active"))
+    .limit(1);
+  if (lsRow?.value !== "true") return ok({ accepted: false, reason: "livestream_off" });
+
+  const body = await c.req.arrayBuffer();
+  if (!body.byteLength) return err("Empty body");
+
+  // Overwrite a fixed R2 key so only the latest frame is stored (no accumulation)
+  const objectKey = `livestream/frame-latest.jpg`;
+  await c.env.IMAGES.put(objectKey, body, {
+    httpMetadata: { contentType: "image/jpeg" },
+    customMetadata: { type: "livestream", ts: new Date().toISOString() },
+  });
+
+  return ok({ accepted: true, objectKey });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/livestream  — Dashboard: toggle livestream on/off
+// ---------------------------------------------------------------------------
+app.post("/api/v1/livestream", async (c) => {
+  const db = drizzle(c.env.DB, { schema });
+  const body = await c.req.json<{ active: boolean }>().catch(() => ({ active: false }));
+  const value = body.active ? "true" : "false";
+  const existing = await db
+    .select()
+    .from(schema.settings)
+    .where(eq(schema.settings.key, "livestream_active"))
+    .limit(1);
+  if (existing.length > 0) {
+    await db
+      .update(schema.settings)
+      .set({ value, updatedAt: new Date().toISOString() })
+      .where(eq(schema.settings.key, "livestream_active"));
+  } else {
+    await db.insert(schema.settings).values({ key: "livestream_active", value });
+  }
+  return ok({ livestreamActive: body.active });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/livestream/frame  — Dashboard: serve the latest livestream frame
+// ---------------------------------------------------------------------------
+app.get("/api/v1/livestream/frame", async (c) => {
+  const object = await c.env.IMAGES.get("livestream/frame-latest.jpg");
+  if (!object) return err("No frame available", 404);
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  // Short cache — dashboard polls rapidly
+  headers.set("Cache-Control", "no-store");
+  return new Response(object.body, { headers });
+});
+
+
 app.patch("/api/v1/settings/master-pin", async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const body = await c.req.json<{ pin?: string }>();

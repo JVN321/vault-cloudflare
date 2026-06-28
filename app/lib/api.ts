@@ -172,3 +172,16 @@ export const commandsApi = {
     }),
 };
 
+// ---------------------------------------------------------------------------
+// Livestream
+// ---------------------------------------------------------------------------
+export const livestreamApi = {
+  /** Enable or disable livestream mode on the device */
+  toggle: (active: boolean) =>
+    request<{ livestreamActive: boolean }>("/v1/livestream", {
+      method: "POST",
+      body: JSON.stringify({ active }),
+    }),
+  /** Returns a cache-busted URL for the latest frame — use as <img src> */
+  frameUrl: () => `${BASE}/v1/livestream/frame?t=${Date.now()}`,
+};

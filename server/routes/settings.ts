@@ -29,6 +29,9 @@ app.patch("/api/v1/settings", async (c) => {
   const keyMap: Record<string, string> = {
     faceConfidenceThreshold: "face_confidence_threshold",
     faceplusplusFaceset: "faceset_id",
+    imageRetentionDays: "image_retention_days",
+    pollIntervalMs: "poll_interval_ms",
+    livestreamActive: "livestream_active",
   };
 
   for (const [rawKey, value] of Object.entries(body)) {

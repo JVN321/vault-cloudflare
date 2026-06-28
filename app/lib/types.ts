@@ -60,6 +60,9 @@ export interface SystemConfig {
   autoLockSeconds: number;
   realtimeAlerts: boolean;
   motionDetection: boolean;
+  imageRetentionDays: number;
+  pollIntervalMs: number;
+  livestreamActive: boolean;
   wifiSsid?: string;
   wifiPassword?: string;
   deviceIp?: string;

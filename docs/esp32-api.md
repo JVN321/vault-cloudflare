@@ -76,25 +76,28 @@ The dashboard queues commands; the ESP32 polls and acknowledges them.
 #### `GET /api/v1/esp/commands/pending`
 
 Poll this endpoint every `poll_interval_ms` milliseconds.  
-Returns the oldest pending command, or `null` if none.
+Returns the oldest pending command (or `null`) **and** the current `livestream` flag.
 
-**Response (command pending):**
+**Response:**
 ```json
 {
-  "id": 42,
-  "type": "UNLOCK",
-  "status": "PENDING",
-  "expires_at": "2024-01-01T12:00:30.000Z",
-  "created_at": "2024-01-01T12:00:00.000Z"
+  "command": {
+    "id": 42,
+    "type": "UNLOCK",
+    "status": "PENDING",
+    "expiresAt": "2024-01-01T12:00:30.000Z",
+    "createdAt": "2024-01-01T12:00:00.000Z"
+  },
+  "livestream": false
 }
 ```
 
-**Response (nothing pending):**
+**Response (no pending command, livestream active):**
 ```json
-null
+{ "command": null, "livestream": true }
 ```
 
-`type` values: `LOCK` | `UNLOCK` | `PULSE` (unlock for 10 s then re-lock)
+`command.type` values: `LOCK` | `UNLOCK` | `PULSE` (unlock for 10 s then re-lock)
 
 > **Commands expire** after 30 s (default). If the ESP32 is offline, the command is discarded automatically.
 
@@ -572,3 +575,177 @@ Add `?download=1` to force a browser download instead of inline display. The `Co
 | `FACEPLUSPLUS_API_SECRET` | `wrangler secret put FACEPLUSPLUS_API_SECRET` | Face++ API secret |
 | `SESSION_SECRET` | `wrangler secret put SESSION_SECRET` | Cookie signing |
 | `CAMERA_API_KEY` | `wrangler secret put CAMERA_API_KEY` | ESP32 auth key |
+| `ADMIN_EMAIL` | `wrangler secret put ADMIN_EMAIL` | Env-admin login email |
+| `ADMIN_PASSWORD` | `wrangler secret put ADMIN_PASSWORD` | Env-admin login password |
+
+---
+
+## Livestream
+
+The dashboard can request a **live video feed** from the ESP32. When active, the device uploads frames at a high rate to a fixed R2 key; the dashboard polls that key every ~500 ms and renders the latest frame.
+
+### How it works
+
+```
+Dashboard           Worker              ESP32
+   |                  |                   |
+   |─ POST /api/v1/livestream {active:true}─▶|
+   |                  |── writes livestream_active=true to D1
+   |                  |                   |
+   |         (next poll cycle)             |
+   |                  |◀─ GET /esp/commands/pending ──|
+   |                  |── { command: null, livestream: true }─▶|
+   |                  |                   |
+   |                  |        ESP32 starts high-rate capture
+   |                  |◀─ POST /esp/livestream (JPEG bytes) ──|
+   |                  |── overwrite R2 key: livestream/frame-latest.jpg
+   |                  |                   |
+   |◀─ GET /api/v1/livestream/frame ──────|
+   |── renders frame in <img> tag         |
+   |   (repeats every 500 ms)             |
+```
+
+### Dashboard endpoints
+
+#### `POST /api/v1/livestream`  (Dashboard, requires session)
+
+Toggle livestream on or off.
+
+**Request body:**
+```json
+{ "active": true }
+```
+
+**Response:**
+```json
+{ "livestreamActive": true }
+```
+
+#### `GET /api/v1/livestream/frame`  (Public — no session)
+
+Serve the latest frame from R2.  
+Returns `404` if no frame has been uploaded yet.
+
+```
+Content-Type: image/jpeg
+Cache-Control: no-store
+```
+
+---
+
+### ESP32 implementation
+
+#### 1. Check `livestream` flag on every poll
+
+```cpp
+// After parsing the /esp/commands/pending JSON response:
+bool livestream_active = doc["livestream"].as<bool>();
+JsonObject command     = doc["command"];
+
+// Handle the command as before...
+if (!command.isNull()) {
+  String type = command["type"].as<String>();
+  // ... execute LOCK / UNLOCK / PULSE ...
+  ackCommand(command["id"].as<int>(), true);
+}
+
+// Adjust frame capture rate
+if (livestream_active) {
+  startLivestreamMode();   // 5–10 fps
+} else {
+  stopLivestreamMode();    // back to normal interval
+}
+```
+
+#### 2. Upload frames to `/api/v1/esp/livestream`
+
+```
+POST /api/v1/esp/livestream
+X-API-Key: <CAMERA_API_KEY>
+Content-Type: image/jpeg
+
+<raw JPEG bytes>
+```
+
+**Response (accepted):**
+```json
+{ "accepted": true, "objectKey": "livestream/frame-latest.jpg" }
+```
+
+**Response (livestream off — device should slow down):**
+```json
+{ "accepted": false, "reason": "livestream_off" }
+```
+
+> The Worker rejects frames when `livestream_active = false` in D1 so the device can't exhaust R2 write limits when the dashboard isn't watching.
+
+#### 3. Suggested Arduino loop
+
+```cpp
+// Globals
+bool  g_livestream = false;
+ulong g_last_frame = 0;
+const uint LIVESTREAM_INTERVAL_MS = 200; // ~5 fps
+const uint NORMAL_INTERVAL_MS     = 5000;
+
+void loop() {
+  ulong now = millis();
+
+  // Poll commands (always at configured interval)
+  if (now - g_last_poll >= poll_interval_ms) {
+    g_last_poll = now;
+    pollCommands();  // sets g_livestream
+  }
+
+  // Capture + upload frame if livestream is on
+  uint frame_interval = g_livestream ? LIVESTREAM_INTERVAL_MS : NORMAL_INTERVAL_MS;
+  if (now - g_last_frame >= frame_interval) {
+    g_last_frame = now;
+    camera_fb_t *fb = esp_camera_fb_get();
+    if (fb) {
+      if (g_livestream) {
+        uploadFrame("/api/v1/esp/livestream", fb->buf, fb->len);
+      } else if (motion_detected) {
+        uploadFrame("/api/v1/upload", fb->buf, fb->len);
+      }
+      esp_camera_fb_return(fb);
+    }
+  }
+}
+```
+
+#### 4. `uploadFrame` helper
+
+```cpp
+bool uploadFrame(const char* path, uint8_t* data, size_t len) {
+  HTTPClient http;
+  String url = String(SERVER_URL) + path + "?api_key=" + CAMERA_API_KEY;
+  http.begin(url);
+  http.addHeader("Content-Type", "image/jpeg");
+  http.addHeader("X-API-Key", CAMERA_API_KEY);
+  int code = http.POST(data, len);
+  bool ok  = (code == 200);
+  http.end();
+  return ok;
+}
+```
+
+### Important notes
+
+- **Only the latest frame is stored** — the Worker overwrites a fixed R2 key (`livestream/frame-latest.jpg`) on every upload, so storage never grows during a session.
+- **Frames are not saved to D1** — they won't appear in the Images gallery.
+- **The dashboard stops the livestream** when the page is unloaded or the Stop button is clicked, which sets `livestream_active = false` in D1. The ESP32 detects this on the next poll and resumes its normal interval.
+- **Frame rate is limited by round-trip latency** (ESP32 → R2 → dashboard fetch). Realistic throughput is 2–5 fps over typical Wi-Fi + Cloudflare routing.
+
+---
+
+## Image Retention Settings
+
+Two settings in the dashboard (Settings → Data Retention) control long-term storage behaviour:
+
+| Setting key (DB) | Dashboard field | Default | Description |
+|---|---|---|---|
+| `image_retention_days` | Image retention (days) | 30 | Frames older than this are purged from R2 + D1 |
+| `poll_interval_ms` | Device poll interval (ms) | 2000 | How often the ESP32 calls `/esp/commands/pending` |
+
+Both are returned to the ESP32 in `GET /api/v1/esp/config` so the device always uses the dashboard-configured value after a reboot.

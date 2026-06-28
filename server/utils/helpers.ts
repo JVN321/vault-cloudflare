@@ -70,6 +70,7 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   faceset_id: "VAULT_FACESET",
   faceplusplusApiKey: "",
   faceplusplusApiSecret: "",
+  livestream_active: "false",
 };
 
 export function parseSettings(map: Record<string, string>): Record<string, unknown> {
@@ -87,5 +88,8 @@ export function parseSettings(map: Record<string, string>): Record<string, unkno
     faceplusplusApiSecret: map["faceplusplusApiSecret"] || "",
     faceplusplusFaceset: map["faceset_id"] || "VAULT_FACESET",
     faceConfidenceThreshold: Number(map["face_confidence_threshold"] ?? "60"),
+    imageRetentionDays: Number(map["image_retention_days"] ?? "30"),
+    pollIntervalMs: Number(map["poll_interval_ms"] ?? "2000"),
+    livestreamActive: map["livestream_active"] === "true",
   };
 }
