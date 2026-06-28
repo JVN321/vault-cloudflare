@@ -23,7 +23,10 @@ ENVIRONMENT = "development"
 # ---------------------------------------------------------------------------
 # SESSION_SECRET   – 32-byte random string for cookie signing
 # CAMERA_API_KEY   – shared secret between ESP32 and the Worker
+# ADMIN_EMAIL      – e.g. admin@yourdomain.com  (enables env-admin login)
+# ADMIN_PASSWORD   – strong passphrase for the dashboard admin account
 # ---------------------------------------------------------------------------
+
 
 [dev]
 port = 8788
