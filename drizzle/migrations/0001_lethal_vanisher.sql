@@ -1,1 +1,0 @@
-ALTER TABLE `temp_pins` ADD `pin` text;

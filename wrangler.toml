@@ -8,8 +8,8 @@ pages_build_output_dir = "./dist"
 [[d1_databases]]
 binding = "DB"
 database_name = "vault-db"
-database_id = "placeholder-replace-after-wrangler-d1-create"
-migrations_dir = "drizzle/migrations"
+database_id = "41650513-f46a-4a3e-8ffc-e8bd6b14161d"
+migrations_dir = "drizzle/migrations-remote"
 
 [[r2_buckets]]
 binding = "IMAGES"
