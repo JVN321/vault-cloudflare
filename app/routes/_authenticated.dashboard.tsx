@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { toast } from "sonner";
 import { useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   ShieldAlert, Camera, Wifi, Unlock, BellOff, Lock, Users, DoorOpen,
   AlertTriangle, ArrowDownLeft, ArrowUpRight, Play, Square, VideoOff, Thermometer, Droplets,
@@ -8,7 +9,7 @@ import {
 import { TopBar } from "@/components/vault/top-bar";
 import { Avatar } from "@/components/vault/status-pill";
 import { cn } from "@/lib/utils";
-import { logsApi, sensorApi, imagesApi } from "@/lib/api";
+import { logsApi, sensorApi, imagesApi, livestreamApi, commandsApi } from "@/lib/api";
 import type { AccessLogEntry } from "@/lib/types";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
@@ -33,6 +34,12 @@ function Dashboard() {
     queryKey: ["sensor-latest"],
     queryFn: () => sensorApi.latest(),
     refetchInterval: 10_000,
+  });
+
+  const commandMutation = useMutation({
+    mutationFn: (type: "LOCK" | "UNLOCK" | "PULSE") => commandsApi.send(type),
+    onSuccess: (_, type) => toast.success(`Command ${type} sent to device queue`),
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Command failed")
   });
 
   const successCount = logs.filter((l) => l.success).length;
@@ -162,13 +169,19 @@ function Dashboard() {
             icon={<Unlock className="h-5 w-5 text-success" />}
             title="Unlock Main Entrance"
             sub="10s pulse"
+            onClick={() => commandMutation.mutate("PULSE")}
+            disabled={commandMutation.isPending}
           />
           <ControlButton
             icon={<BellOff className="h-5 w-5 text-primary" />}
             title="Reset Alarms"
             sub="Clear active alerts"
+            onClick={() => toast.success("Alarms reset")}
           />
-          <LockdownButton />
+          <LockdownButton 
+            onTrigger={() => commandMutation.mutate("LOCK")} 
+            disabled={commandMutation.isPending} 
+          />
         </div>
       </div>
     </div>
@@ -176,57 +189,73 @@ function Dashboard() {
 }
 
 function CameraStream({ stamp }: { stamp: string }) {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const [state, setState] = useState<"idle" | "loading" | "live" | "error">("idle");
-  const [error, setError] = useState<string>("");
+  const [active, setActive] = useState(false);
+  const [frameUrl, setFrameUrl] = useState<string | null>(null);
+  const [frameError, setFrameError] = useState(false);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const LIVESTREAM_FPS_MS = 500;
 
   const { data: latestImage } = useQuery({
     queryKey: ["latest-image"],
     queryFn: () => imagesApi.latest(),
-    refetchInterval: state === "live" ? false : 5_000,
+    refetchInterval: active ? false : 5_000,
   });
 
-  async function start() {
-    setState("loading");
-    setError("");
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
-        audio: false,
-      });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+  const toggleMutation = useMutation({
+    mutationFn: (on: boolean) => livestreamApi.toggle(on),
+    onSuccess: (data) => {
+      setActive(data.livestreamActive);
+      if (!data.livestreamActive) {
+        if (intervalRef.current) clearInterval(intervalRef.current);
+        intervalRef.current = null;
+        setFrameUrl(null);
+        setFrameError(false);
       }
-      setState("live");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Camera unavailable");
-      setState("error");
-    }
+    },
+  });
+
+  useEffect(() => {
+    if (!active) return;
+    const tick = () => {
+      setFrameUrl(livestreamApi.frameUrl());
+      setFrameError(false);
+    };
+    tick(); // immediate first frame
+    intervalRef.current = setInterval(tick, LIVESTREAM_FPS_MS);
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [active]);
+
+  useEffect(() => {
+    return () => {
+      if (active) livestreamApi.toggle(false).catch(() => {});
+    };
+  }, [active]);
+
+  function start() {
+    toggleMutation.mutate(true);
   }
 
   function stop() {
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
-    if (videoRef.current) videoRef.current.srcObject = null;
-    setState("idle");
+    toggleMutation.mutate(false);
   }
-
-  useEffect(() => () => stop(), []);
 
   return (
     <div className="relative aspect-video w-full overflow-hidden bg-slate-950">
-      <video
-        ref={videoRef}
-        playsInline
-        muted
-        className={cn("h-full w-full object-cover", state === "live" ? "opacity-100" : "opacity-0")}
-      />
+      {active && frameUrl ? (
+        <img
+          key={frameUrl}
+          src={frameUrl}
+          alt="Live frame"
+          onError={() => setFrameError(true)}
+          onLoad={() => setFrameError(false)}
+          className={cn("h-full w-full object-cover", frameError ? "opacity-0" : "opacity-100")}
+        />
+      ) : null}
 
       {/* Show latest R2 image when not streaming */}
-      {state !== "live" && latestImage && (
+      {!active && latestImage && (
         <img
           src={imagesApi.getUrl(latestImage.objectKey)}
           alt="Latest camera capture"
@@ -234,15 +263,15 @@ function CameraStream({ stamp }: { stamp: string }) {
         />
       )}
 
-      {state !== "live" && (
+      {!active && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-gradient-to-br from-slate-900/80 to-slate-950/90 text-slate-200">
-          {state === "error" ? (
+          {toggleMutation.isError ? (
             <>
               <VideoOff className="h-10 w-10 text-destructive" />
               <div className="text-center">
-                <p className="text-sm font-semibold">Camera unavailable</p>
+                <p className="text-sm font-semibold">Connection failed</p>
                 <p className="mt-1 max-w-xs px-4 font-mono-data text-[10px] uppercase tracking-[0.15em] text-slate-400">
-                  {error}
+                  {toggleMutation.error instanceof Error ? toggleMutation.error.message : "Network error"}
                 </p>
               </div>
               <button
@@ -269,19 +298,24 @@ function CameraStream({ stamp }: { stamp: string }) {
               </div>
               <button
                 onClick={start}
-                disabled={state === "loading"}
+                disabled={toggleMutation.isPending}
                 className="inline-flex items-center gap-2 rounded-md bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow hover:brightness-110 disabled:opacity-60"
               >
                 <Play className="h-4 w-4" />
-                {state === "loading" ? "Connecting…" : "Start Live Stream"}
+                {toggleMutation.isPending ? "Connecting…" : "Start Live Stream"}
               </button>
             </>
           )}
         </div>
       )}
 
-      {state === "live" && (
+      {active && (
         <>
+          {frameError && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white/60 bg-slate-950">
+              <span className="text-xs animate-pulse font-mono">Waiting for device frame...</span>
+            </div>
+          )}
           <div className="absolute right-3 top-3 flex flex-col items-end gap-1.5">
             <span className="inline-flex items-center gap-1.5 rounded-sm border border-destructive/40 bg-black/70 px-2 py-1 font-mono-data text-[10px] font-bold uppercase tracking-[0.25em] text-destructive backdrop-blur">
               <span className="h-1.5 w-1.5 rounded-full bg-destructive pulse-dot" /> LIVE
@@ -329,11 +363,14 @@ function Kpi({
   );
 }
 
-function ControlButton({ icon, title, sub }: { icon: React.ReactNode; title: string; sub: string }) {
+function ControlButton({ icon, title, sub, onClick, disabled }: { icon: React.ReactNode; title: string; sub: string; onClick?: () => void; disabled?: boolean; }) {
   return (
-    <button className={cn(
+    <button 
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
       "group flex h-14 items-center gap-3 rounded-md border border-border bg-card px-4 text-left transition",
-      "hover:-translate-y-px hover:border-primary/50 hover:shadow-md",
+      "hover:-translate-y-px hover:border-primary/50 hover:shadow-md disabled:opacity-50",
       "active:translate-y-0"
     )}>
       {icon}
@@ -345,19 +382,28 @@ function ControlButton({ icon, title, sub }: { icon: React.ReactNode; title: str
   );
 }
 
-function LockdownButton() {
+function LockdownButton({ onTrigger, disabled }: { onTrigger: () => void; disabled?: boolean; }) {
   const [holding, setHolding] = useState(false);
   const [progress, setProgress] = useState(0);
   const holdingRef = useRef(false);
+  const triggeredRef = useRef(false);
 
   function start() {
+    if (disabled) return;
     setHolding(true);
     holdingRef.current = true;
+    triggeredRef.current = false;
     const startedAt = Date.now();
     const tick = () => {
       const p = Math.min(1, (Date.now() - startedAt) / 1200);
       setProgress(p);
-      if (p < 1 && holdingRef.current) requestAnimationFrame(tick);
+      if (p >= 1 && holdingRef.current && !triggeredRef.current) {
+        triggeredRef.current = true;
+        onTrigger();
+        stop();
+      } else if (p < 1 && holdingRef.current) {
+        requestAnimationFrame(tick);
+      }
     };
     requestAnimationFrame(tick);
   }
