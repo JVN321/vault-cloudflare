@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { createClient } from "@supabase/supabase-js";
 import * as schema from "../../drizzle/schema";
 import { Env } from "../types";
 import {
@@ -85,9 +86,10 @@ app.post("/api/v1/users/enroll-face", async (c) => {
   if (!faceApiKey || !faceApiSecret)
     return err("Face++ API credentials not configured in Dashboard or Environment", 503);
 
-  // Fetch image from R2 and convert to base64
-  const r2Obj = await c.env.IMAGES.get(body.objectKey);
-  if (!r2Obj) return err("Image not found in storage", 404);
+  // Fetch image from Supabase and convert to base64
+  const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_SECRET_KEY);
+  const { data: r2Obj, error } = await supabase.storage.from("vault-images").download(body.objectKey);
+  if (error || !r2Obj) return err("Image not found in storage", 404);
   const imageBase64 = arrayBufferToBase64(await r2Obj.arrayBuffer());
 
   // Detect face in image

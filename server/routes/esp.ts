@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { eq, and, gt, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { createClient } from "@supabase/supabase-js";
 import * as schema from "../../drizzle/schema";
 import { Env } from "../types";
 import {
@@ -87,13 +88,13 @@ app.post("/api/v1/upload", async (c) => {
   if (!body.byteLength) return err("Empty body");
 
   const objectKey = `images/${Date.now()}-${crypto.randomUUID()}.jpg`;
-  await c.env.IMAGES.put(objectKey, body, {
-    httpMetadata: { contentType: "image/jpeg" },
-    customMetadata: {
-      cameraId: String(cameraId ?? ""),
-      motionDetected: String(motionDetected),
-    },
+
+  const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_SECRET_KEY);
+  const { error } = await supabase.storage.from("vault-images").upload(objectKey, body, {
+    contentType: "image/jpeg",
+    upsert: true,
   });
+  if (error) return err(`Failed to upload to Supabase: ${error.message}`, 500);
 
   const [imgRecord] = await db
     .insert(schema.images)
@@ -396,12 +397,15 @@ app.post("/api/v1/esp/livestream", async (c) => {
   const body = await c.req.arrayBuffer();
   if (!body.byteLength) return err("Empty body");
 
-  // Overwrite a fixed R2 key so only the latest frame is stored (no accumulation)
+  // Overwrite a fixed Supabase key so only the latest frame is stored (no accumulation)
   const objectKey = `livestream/frame-latest.jpg`;
-  await c.env.IMAGES.put(objectKey, body, {
-    httpMetadata: { contentType: "image/jpeg" },
-    customMetadata: { type: "livestream", ts: new Date().toISOString() },
+
+  const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_SECRET_KEY);
+  const { error } = await supabase.storage.from("vault-images").upload(objectKey, body, {
+    contentType: "image/jpeg",
+    upsert: true,
   });
+  if (error) return err(`Failed to upload to Supabase: ${error.message}`, 500);
 
   return ok({ accepted: true, objectKey });
 });
@@ -435,13 +439,15 @@ app.post("/api/v1/livestream", async (c) => {
 // (Public — no auth required; URL is unguessable enough as a view-only endpoint)
 // ---------------------------------------------------------------------------
 app.get("/api/v1/livestream/frame", async (c) => {
-  const object = await c.env.IMAGES.get("livestream/frame-latest.jpg");
-  if (!object) return err("No frame available", 404);
+  const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_SECRET_KEY);
+  const { data, error } = await supabase.storage.from("vault-images").download("livestream/frame-latest.jpg");
+
+  if (error || !data) return err("No frame available", 404);
   const headers = new Headers();
-  object.writeHttpMetadata(headers);
+  headers.set("Content-Type", "image/jpeg");
   // Short cache — dashboard polls rapidly
   headers.set("Cache-Control", "no-store");
-  return new Response(object.body, { headers });
+  return new Response(data, { headers });
 });
 
 // ---------------------------------------------------------------------------

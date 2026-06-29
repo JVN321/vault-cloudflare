@@ -9,11 +9,14 @@ pages_build_output_dir = "./dist"
 binding = "DB"
 database_name = "vault-db"
 database_id = "41650513-f46a-4a3e-8ffc-e8bd6b14161d"
-migrations_dir = "drizzle/migrations-remote"
+migrations_dir = "drizzle/migrations-local"
 
-[[r2_buckets]]
-binding = "IMAGES"
-bucket_name = "vault-images"
+[env.production]
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "vault-db"
+database_id = "41650513-f46a-4a3e-8ffc-e8bd6b14161d"
+migrations_dir = "drizzle/migrations-remote"
 
 [vars]
 ENVIRONMENT = "development"
@@ -21,10 +24,12 @@ ENVIRONMENT = "development"
 # ---------------------------------------------------------------------------
 # Secrets (set via `wrangler secret put <NAME>`)
 # ---------------------------------------------------------------------------
-# SESSION_SECRET   – 32-byte random string for cookie signing
-# CAMERA_API_KEY   – shared secret between ESP32 and the Worker
-# ADMIN_EMAIL      – e.g. admin@yourdomain.com  (enables env-admin login)
-# ADMIN_PASSWORD   – strong passphrase for the dashboard admin account
+# SESSION_SECRET            – 32-byte random string for cookie signing
+# CAMERA_API_KEY            – shared secret between ESP32 and the Worker
+# ADMIN_EMAIL               – e.g. admin@yourdomain.com  (enables env-admin login)
+# ADMIN_PASSWORD            – strong passphrase for the dashboard admin account
+# SUPABASE_URL              – URL for Supabase storage bucket
+# SUPABASE_SECRET_KEY       – Supabase Secret Key for backend access
 # ---------------------------------------------------------------------------
 
 

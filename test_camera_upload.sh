@@ -4,7 +4,13 @@
 # Make sure your backend is running on http://localhost:8788
 
 API_URL="http://localhost:8788"
-API_KEY="test_key_123" # Replace with your actual camera api key
+# Read API_KEY from .dev.vars
+if [ -f ".dev.vars" ]; then
+  # Use grep and sed to safely extract the value even if it has quotes
+  API_KEY=$(grep "^CAMERA_API_KEY=" .dev.vars | sed 's/^.*=//' | tr -d '"')
+else
+  API_KEY="test_key_123"
+fi
 
 # 1. Upload a picture (ESP32 simulation)
 # Replace 'test_face.jpg' with a real image containing a face.

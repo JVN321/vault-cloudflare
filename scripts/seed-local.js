@@ -31,7 +31,7 @@ async function main() {
   console.log("Running local migration check first...");
   try {
     // Pass "y\n" via stdin to auto-confirm the migration prompt
-    execSync("pnpm db:migrate", { stdio: ["pipe", "inherit", "inherit"], input: "y\n" });
+    execSync("pnpm db:migrate:local", { stdio: ["pipe", "inherit", "inherit"], input: "y\n" });
   } catch {
     console.error("Migration failed, trying to continue seed anyway...");
   }

@@ -12,9 +12,15 @@ set -euo pipefail
 
 # ── Config ──────────────────────────────────────────────────────────────────
 BASE="http://localhost:8788/api/v1"
-CAMERA_API_KEY="test_key_123"
-ADMIN_EMAIL="admin@vault.local"
-ADMIN_PASSWORD="admin1234"
+if [ -f ".dev.vars" ]; then
+  CAMERA_API_KEY=$(grep "^CAMERA_API_KEY=" .dev.vars | sed 's/^.*=//' | tr -d '"')
+  ADMIN_EMAIL=$(grep "^ADMIN_EMAIL=" .dev.vars | sed 's/^.*=//' | tr -d '"')
+  ADMIN_PASSWORD=$(grep "^ADMIN_PASSWORD=" .dev.vars | sed 's/^.*=//' | tr -d '"')
+else
+  CAMERA_API_KEY="test_key_123"
+  ADMIN_EMAIL="admin@vault.local"
+  ADMIN_PASSWORD="admin1234"
+fi
 
 # Colours
 GRN="\033[0;32m"; RED="\033[0;31m"; YLW="\033[0;33m"; BLU="\033[0;34m"; RST="\033[0m"

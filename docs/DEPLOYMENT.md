@@ -26,15 +26,13 @@ Cloudflare D1 is our serverless SQL database.
     ```
     *(Alternatively, use `pnpm db:migrate` if you are using drizzle migrations).*
 
-## 2. Create the R2 Bucket
+## 2. Set up Supabase Storage
 
-Cloudflare R2 is our object storage for saving doorbell captures and face enrollments.
+We use Supabase Storage for saving doorbell captures and face enrollments.
 
-1.  Create the bucket:
-    ```bash
-    npx wrangler r2 bucket create vault-images
-    ```
-    *(If you named it differently, ensure you update `wrangler.toml` under `[[r2_buckets]]` -> `bucket_name`).*
+1.  Create a project on [Supabase](https://supabase.com/).
+2.  Go to Storage and create a new bucket named `vault-images`.
+3.  Ensure the bucket is configured to accept image uploads. The backend uses the Service Role Key to manage files, so the bucket doesn't need to be public.
 
 ## 3. Configure Secrets
 
@@ -47,9 +45,17 @@ npx wrangler pages secret put SESSION_SECRET
 # Used by the ESP32 hardware to authenticate API requests
 npx wrangler pages secret put CAMERA_API_KEY
 
+# Supabase Storage Configuration
+npx wrangler pages secret put SUPABASE_URL
+npx wrangler pages secret put SUPABASE_SECRET_KEY
+
 # (Optional) Face++ Credentials if not configuring them via the Dashboard
 npx wrangler pages secret put FACEPLUSPLUS_API_KEY
 npx wrangler pages secret put FACEPLUSPLUS_API_SECRET
+
+# Admin user details
+npx wrangler pages secret put ADMIN_EMAIL
+npx wrangler pages secret put ADMIN_PASSWORD
 ```
 
 ## 4. Deploy the Application

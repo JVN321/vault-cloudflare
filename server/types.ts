@@ -1,6 +1,7 @@
 export type Env = {
   DB: D1Database;
-  IMAGES: R2Bucket;
+  SUPABASE_URL: string;
+  SUPABASE_SECRET_KEY: string;
   SESSION_SECRET: string;
   CAMERA_API_KEY: string;
   FACEPLUSPLUS_API_KEY?: string;
