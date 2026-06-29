@@ -21,6 +21,9 @@ migrations_dir = "drizzle/migrations-remote"
 [vars]
 ENVIRONMENT = "development"
 
+[env.production.vars]
+ENVIRONMENT = "production"
+
 # ---------------------------------------------------------------------------
 # Secrets (set via `wrangler secret put <NAME>`)
 # ---------------------------------------------------------------------------
