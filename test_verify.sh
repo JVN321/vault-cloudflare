@@ -2,8 +2,8 @@
 # test_verify.sh
 # Run this script to test the face verification endpoint.
 
-API_URL="http://localhost:8788"
-# API_URL="https://vault-cloudflare-8fu.pages.dev"
+# API_URL="http://localhost:8788"
+API_URL="https://vault-cloudflare-8fu.pages.dev"
 
 # Read API_KEY from .dev.vars
 if [ -f ".dev.vars" ]; then

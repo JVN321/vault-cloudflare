@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "../../drizzle/schema";
 import { Env } from "../types";
@@ -14,8 +14,18 @@ app.get("/api/v1/access-logs", async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const limit = Math.min(Number(c.req.query("limit") ?? "50"), 500);
   const logs = await db
-    .select()
+    .select({
+      id: schema.accessLogs.id,
+      userId: schema.accessLogs.userId,
+      method: schema.accessLogs.method,
+      success: schema.accessLogs.success,
+      location: schema.accessLogs.location,
+      action: schema.accessLogs.action,
+      timestamp: schema.accessLogs.timestamp,
+      userName: schema.users.name,
+    })
     .from(schema.accessLogs)
+    .leftJoin(schema.users, eq(schema.accessLogs.userId, schema.users.id))
     .orderBy(desc(schema.accessLogs.timestamp))
     .limit(limit);
   return ok(logs);
