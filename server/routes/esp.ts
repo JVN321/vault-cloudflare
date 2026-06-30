@@ -356,11 +356,16 @@ app.post("/api/v1/face/verify", async (c) => {
   const facesetId = map["faceset_id"] || "VAULT_FACESET";
   const threshold = Number(map["face_confidence_threshold"] ?? "60");
 
-  const result = await facePlusPlus("search", faceApiKey, faceApiSecret, {
-    outer_id: facesetId,
-    image_base64: imageBase64,
-    return_result_count: "5",
-  });
+  let result: any = { results: [] };
+  try {
+    result = await facePlusPlus("search", faceApiKey, faceApiSecret, {
+      outer_id: facesetId,
+      image_base64: imageBase64,
+      return_result_count: "5",
+    });
+  } catch (e: any) {
+    if (e.message !== "EMPTY_FACESET") throw e;
+  }
 
   type FaceResult = { confidence: number; user_id?: string };
   const results = result.results as FaceResult[] | undefined;
