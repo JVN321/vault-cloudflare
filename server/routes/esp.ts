@@ -249,7 +249,7 @@ app.post("/api/v1/esp/auth/pin", async (c) => {
     .where(eq(schema.settings.key, "master_pin_sha256"))
     .limit(1);
   if (masterRow?.value && masterRow.value === inputHash) {
-    await db.insert(schema.accessLogs).values({ method: "PIN", success: true });
+    await db.insert(schema.accessLogs).values({ method: "PIN", success: true, timestamp: new Date().toISOString() });
     return ok({ granted: true, type: "master" });
   }
 
@@ -266,12 +266,12 @@ app.post("/api/v1/esp/auth/pin", async (c) => {
       .update(schema.tempPins)
       .set({ useCount: newCount, status: newStatus })
       .where(eq(schema.tempPins.id, match.id));
-    await db.insert(schema.accessLogs).values({ method: "PIN", success: true });
+    await db.insert(schema.accessLogs).values({ method: "PIN", success: true, userId: match.createdBy, timestamp: new Date().toISOString() });
     return ok({ granted: true, type: "temp", temp_pin_id: match.id, label: match.label });
   }
 
   // 3. Denied
-  await db.insert(schema.accessLogs).values({ method: "PIN", success: false });
+  await db.insert(schema.accessLogs).values({ method: "PIN", success: false, timestamp: new Date().toISOString() });
   return err("Invalid PIN", 401);
 });
 
@@ -366,6 +366,7 @@ app.post("/api/v1/face/verify", async (c) => {
   const results = result.results as FaceResult[] | undefined;
   let granted = false;
   let identifiedName = "Unknown";
+  let matchedUserId: number | null = null;
 
   if (results?.length) {
     for (const match of results) {
@@ -397,12 +398,18 @@ app.post("/api/v1/face/verify", async (c) => {
       ) {
         granted = true;
         identifiedName = matchedUser.name;
+        matchedUserId = matchedUser.id;
         break; // found a valid active user, stop checking other matches
       }
     }
   }
 
-  await db.insert(schema.accessLogs).values({ method: "FACE", success: granted });
+  await db.insert(schema.accessLogs).values({
+    method: "FACE",
+    success: granted,
+    userId: matchedUserId,
+    timestamp: new Date().toISOString()
+  });
 
   return ok({
     granted,
