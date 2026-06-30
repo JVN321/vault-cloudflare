@@ -170,15 +170,23 @@ app.put("/api/v1/users/:id", async (c) => {
     status?: string;
   };
   const body = await c.req.json<UpdateBody>();
+  const setObj = {
+    ...(body.name !== undefined && { name: body.name }),
+    ...(body.email !== undefined && { email: body.email }),
+    ...(body.role !== undefined && { role: body.role as schema.User["role"] }),
+    ...(body.department !== undefined && { department: body.department }),
+    ...(body.status !== undefined && { status: body.status as schema.User["status"] }),
+  };
+
+  if (Object.keys(setObj).length === 0) {
+    const [user] = await db.select().from(schema.users).where(eq(schema.users.id, id));
+    if (!user) return err("User not found", 404);
+    return ok(sanitizeUser(user));
+  }
+
   const [user] = await db
     .update(schema.users)
-    .set({
-      ...(body.name !== undefined && { name: body.name }),
-      ...(body.email !== undefined && { email: body.email }),
-      ...(body.role !== undefined && { role: body.role as schema.User["role"] }),
-      ...(body.department !== undefined && { department: body.department }),
-      ...(body.status !== undefined && { status: body.status as schema.User["status"] }),
-    })
+    .set(setObj)
     .where(eq(schema.users.id, id))
     .returning();
   if (!user) return err("User not found", 404);
@@ -190,14 +198,22 @@ app.patch("/api/v1/users/:id/access", async (c) => {
   const id = Number(c.req.param("id"));
   type AccessBody = { status?: string; allowedAuthMethods?: string[] };
   const body = await c.req.json<AccessBody>();
+  const setObj = {
+    ...(body.status !== undefined && { status: body.status as schema.User["status"] }),
+    ...(body.allowedAuthMethods !== undefined && {
+      allowedAuthMethods: JSON.stringify(body.allowedAuthMethods),
+    }),
+  };
+
+  if (Object.keys(setObj).length === 0) {
+    const [user] = await db.select().from(schema.users).where(eq(schema.users.id, id));
+    if (!user) return err("User not found", 404);
+    return ok(sanitizeUser(user));
+  }
+
   const [user] = await db
     .update(schema.users)
-    .set({
-      ...(body.status !== undefined && { status: body.status as schema.User["status"] }),
-      ...(body.allowedAuthMethods !== undefined && {
-        allowedAuthMethods: JSON.stringify(body.allowedAuthMethods),
-      }),
-    })
+    .set(setObj)
     .where(eq(schema.users.id, id))
     .returning();
   if (!user) return err("User not found", 404);

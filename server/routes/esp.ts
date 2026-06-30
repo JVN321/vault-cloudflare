@@ -359,6 +359,7 @@ app.post("/api/v1/face/verify", async (c) => {
   const result = await facePlusPlus("search", faceApiKey, faceApiSecret, {
     outer_id: facesetId,
     image_base64: imageBase64,
+    return_result_count: "5",
   });
 
   type FaceResult = { confidence: number; user_id?: string };
@@ -366,9 +367,39 @@ app.post("/api/v1/face/verify", async (c) => {
   let granted = false;
   let identifiedName = "Unknown";
 
-  if (results?.length && results[0].confidence >= threshold) {
-    granted = true;
-    identifiedName = results[0].user_id ?? "Verified User";
+  if (results?.length) {
+    for (const match of results) {
+      if (match.confidence < threshold) continue;
+
+      const matchedUsername = match.user_id;
+      if (!matchedUsername) continue;
+
+      const [matchedUser] = await db
+        .select()
+        .from(schema.users)
+        .where(eq(schema.users.username, matchedUsername))
+        .limit(1);
+
+      if (!matchedUser) {
+        // Cleanup stale face token from Face++ since user no longer exists in our DB
+        if (match.face_token) {
+          await facePlusPlus("faceset/removeface", faceApiKey, faceApiSecret, {
+            outer_id: facesetId,
+            face_tokens: match.face_token,
+          }).catch(() => {}); // ignore errors during background cleanup
+        }
+        continue;
+      }
+
+      if (
+        matchedUser.status === "ACTIVE" &&
+        JSON.parse(matchedUser.allowedAuthMethods ?? "[]").includes("FACE")
+      ) {
+        granted = true;
+        identifiedName = matchedUser.name;
+        break; // found a valid active user, stop checking other matches
+      }
+    }
   }
 
   await db.insert(schema.accessLogs).values({ method: "FACE", success: granted });
