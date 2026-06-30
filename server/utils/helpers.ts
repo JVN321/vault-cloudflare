@@ -1,4 +1,3 @@
-import { Env } from "../types";
 
 export function ok<T>(data: T) {
   return Response.json({ success: true, data });
@@ -38,7 +37,7 @@ export function generateTempCode(): string {
   return `VLT-${seg()}-${seg()}`;
 }
 
-export async function facePlusPlus(endpoint: string, apiKey: string, apiSecret: string, data: Record<string, string>) {
+export async function facePlusPlus(endpoint: string, apiKey: string, apiSecret: string, data: Record<string, string>, retries = 3): Promise<any> {
   const form = new FormData();
   form.append("api_key", apiKey);
   form.append("api_secret", apiSecret);
@@ -49,7 +48,14 @@ export async function facePlusPlus(endpoint: string, apiKey: string, apiSecret: 
     body: form,
   });
   const json = await res.json();
-  if (!res.ok) throw new Error((json as any).error_message || "Face++ API error");
+  if (!res.ok) {
+    const errorMsg = (json as any).error_message || "Face++ API error";
+    if (errorMsg === "CONCURRENCY_LIMIT_EXCEEDED" && retries > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      return facePlusPlus(endpoint, apiKey, apiSecret, data, retries - 1);
+    }
+    throw new Error(errorMsg);
+  }
   return json;
 }
 

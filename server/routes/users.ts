@@ -101,19 +101,24 @@ app.post("/api/v1/users/enroll-face", async (c) => {
   const faceToken = faces[0].face_token;
 
   // Add face to faceset (create if missing)
-  const addResult = await facePlusPlus("faceset/addface", faceApiKey, faceApiSecret, {
-    outer_id: facesetId,
-    face_tokens: faceToken,
-  });
-  if ((addResult as { error_message?: string }).error_message?.includes("INVALID_OUTER_ID")) {
-    await facePlusPlus("faceset/create", faceApiKey, faceApiSecret, {
-      outer_id: facesetId,
-      display_name: "Vault Access Faceset",
-    });
+  try {
     await facePlusPlus("faceset/addface", faceApiKey, faceApiSecret, {
       outer_id: facesetId,
       face_tokens: faceToken,
     });
+  } catch (err: any) {
+    if (err.message?.includes("INVALID_OUTER_ID")) {
+      await facePlusPlus("faceset/create", faceApiKey, faceApiSecret, {
+        outer_id: facesetId,
+        display_name: "Vault Access Faceset",
+      });
+      await facePlusPlus("faceset/addface", faceApiKey, faceApiSecret, {
+        outer_id: facesetId,
+        face_tokens: faceToken,
+      });
+    } else {
+      throw err;
+    }
   }
 
   // Create user in DB (INACTIVE by default — admin must activate)
@@ -137,12 +142,11 @@ app.post("/api/v1/users/enroll-face", async (c) => {
 
   if (!user) return err("Failed to create user", 500);
 
-  // Tag face with username and train
+  // Tag face with username
   await facePlusPlus("face/setuserid", faceApiKey, faceApiSecret, {
     face_token: faceToken,
     user_id: user.username,
   });
-  await facePlusPlus("faceset/train", faceApiKey, faceApiSecret, { outer_id: facesetId });
 
   // Save face credential
   await db.insert(schema.credentials).values({
