@@ -208,7 +208,10 @@ function CameraStream({ stamp }: { stamp: string }) {
       if (!data.livestreamActive) {
         if (intervalRef.current) clearInterval(intervalRef.current);
         intervalRef.current = null;
-        setFrameUrl(null);
+        setFrameUrl(prev => {
+          if (prev && prev.startsWith("blob:")) URL.revokeObjectURL(prev);
+          return null;
+        });
         setFrameError(false);
       }
     },
@@ -216,13 +219,31 @@ function CameraStream({ stamp }: { stamp: string }) {
 
   useEffect(() => {
     if (!active) return;
-    const tick = () => {
-      setFrameUrl(livestreamApi.frameUrl());
-      setFrameError(false);
+    let cancelled = false;
+
+    const fetchFrame = async () => {
+      try {
+        const res = await fetch(livestreamApi.frameUrl());
+        if (!res.ok) throw new Error("bad frame");
+        const blob = await res.blob();
+        if (cancelled) return;
+        
+        const objectUrl = URL.createObjectURL(blob);
+        setFrameUrl(prev => {
+          if (prev && prev.startsWith("blob:")) URL.revokeObjectURL(prev);
+          return objectUrl;
+        });
+        setFrameError(false);
+      } catch (err) {
+        if (!cancelled) setFrameError(true);
+      }
     };
-    tick(); // immediate first frame
-    intervalRef.current = setInterval(tick, LIVESTREAM_FPS_MS);
+
+    fetchFrame();
+    intervalRef.current = setInterval(fetchFrame, LIVESTREAM_FPS_MS);
+
     return () => {
+      cancelled = true;
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
   }, [active]);

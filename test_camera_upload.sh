@@ -3,8 +3,8 @@
 # Run this script to test the camera image upload and face enrollment endpoint.
 # Make sure your backend is running on http://localhost:8788
 
- API_URL="http://localhost:8788"
-#API_URL="https://vault-cloudflare-8fu.pages.dev"
+# API_URL="http://localhost:8788"
+API_URL="https://vault-cloudflare-8fu.pages.dev"
 # Read API_KEY from .dev.vars
 if [ -f ".dev.vars" ]; then
   # Use grep and sed to safely extract the value even if it has quotes
