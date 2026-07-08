@@ -156,7 +156,7 @@ app.get("/api/v1/esp/config", async (c) => {
     face_api_key: map["faceplusplusApiKey"] || c.env.FACEPLUSPLUS_API_KEY,
     face_api_secret: map["faceplusplusApiSecret"] || c.env.FACEPLUSPLUS_API_SECRET,
     faceset_id: map["faceset_id"] || "VAULT_FACESET",
-    face_confidence_threshold: Number(map["face_confidence_threshold"] ?? "60"),
+    face_confidence_threshold: Number(map["face_confidence_threshold"] ?? "40"),
   });
 });
 
@@ -325,12 +325,11 @@ app.post("/api/v1/face/enroll", async (c) => {
     });
   }
 
-  // Tag and train
+  // Tag
   await facePlusPlus("face/setuserid", faceApiKey, faceApiSecret, {
     face_token: faceToken,
     user_id: name,
   });
-  await facePlusPlus("faceset/train", faceApiKey, faceApiSecret, { outer_id: facesetId });
 
   return ok({ status: "enrolled", name });
 });
@@ -354,7 +353,7 @@ app.post("/api/v1/face/verify", async (c) => {
   const imageBase64 = arrayBufferToBase64(body);
 
   const facesetId = map["faceset_id"] || "VAULT_FACESET";
-  const threshold = Number(map["face_confidence_threshold"] ?? "60");
+  const threshold = Number(map["face_confidence_threshold"] ?? "40");
 
   let result: any = { results: [] };
   try {
@@ -392,7 +391,7 @@ app.post("/api/v1/face/verify", async (c) => {
           await facePlusPlus("faceset/removeface", faceApiKey, faceApiSecret, {
             outer_id: facesetId,
             face_tokens: match.face_token,
-          }).catch(() => {}); // ignore errors during background cleanup
+          }).catch(() => { }); // ignore errors during background cleanup
         }
         continue;
       }

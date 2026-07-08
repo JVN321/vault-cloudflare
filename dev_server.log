@@ -1,0 +1,53 @@
+
+> vault-cloudflare@0.1.0 dev:api
+> wrangler pages dev ./dist --port 8788
+
+
+ ⛅️ wrangler 4.105.0 (update available 4.108.0)
+───────────────────────────────────────────────
+✨ Compiled Worker successfully
+Using secrets defined in .dev.vars
+Your Worker has access to the following bindings:
+Binding                                                                       Resource                  Mode
+env.DB (vault-db)                                                             D1 Database               local
+env.CF_PAGES ("1")                                                            Environment Variable      local
+env.CF_PAGES_BRANCH ("main")                                                  Environment Variable      local
+env.CF_PAGES_COMMIT_SHA ("4ed72d1f0bbba61f6f587f67047717381c6b8...")          Environment Variable      local
+env.CF_PAGES_URL ("https://4ed72d1.vault-cloudflare.page...")                 Environment Variable      local
+env.ENVIRONMENT ("development")                                               Environment Variable      local
+env.SESSION_SECRET ("(hidden)")                                               Environment Variable      local
+env.CAMERA_API_KEY ("(hidden)")                                               Environment Variable      local
+env.FACEPLUSPLUS_API_KEY ("(hidden)")                                         Environment Variable      local
+env.FACEPLUSPLUS_API_SECRET ("(hidden)")                                      Environment Variable      local
+env.ADMIN_EMAIL ("(hidden)")                                                  Environment Variable      local
+env.ADMIN_PASSWORD ("(hidden)")                                               Environment Variable      local
+env.SUPABASE_URL ("(hidden)")                                                 Environment Variable      local
+env.SUPABASE_SECRET_KEY ("(hidden)")                                          Environment Variable      local
+
+⎔ Starting local server...
+[wrangler:info] Ready on http://localhost:8788
+[wrangler:info] POST /api/v1/upload 200 OK (2197ms)
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mError: API_NOT_FOUND[0m
+
+      at facePlusPlus (file:///devdrive/github/vault/vault-cloudflare/server/utils/helpers.ts:57:11)
+      at null.<anonymous> (async file:///devdrive/github/vault/vault-cloudflare/.wrangler/tmp/dev-Dcm1HP/functionsWorker-0.4806062507888057.js:32736:3)
+      at async dispatch (file:///devdrive/github/vault/vault-cloudflare/node_modules/.pnpm/hono@4.12.27/node_modules/hono/dist/compose.js:22:17)
+      at async dispatch (file:///devdrive/github/vault/vault-cloudflare/node_modules/.pnpm/hono@4.12.27/node_modules/hono/dist/compose.js:22:17)
+      at async dispatch (file:///devdrive/github/vault/vault-cloudflare/node_modules/.pnpm/hono@4.12.27/node_modules/hono/dist/compose.js:22:17)
+      at null.<anonymous> (async file:///devdrive/github/vault/vault-cloudflare/.wrangler/tmp/dev-Dcm1HP/functionsWorker-0.4806062507888057.js:3243:27)
+      at async next (file:///devdrive/github/vault/vault-cloudflare/node_modules/.pnpm/wrangler@4.105.0_@cloudflare+workers-types@4.20260625.1/node_modules/wrangler/templates/pages-template-worker.ts:161:22)
+      at async Object.fetch (file:///devdrive/github/vault/vault-cloudflare/node_modules/.pnpm/wrangler@4.105.0_@cloudflare+workers-types@4.20260625.1/node_modules/wrangler/templates/pages-template-worker.ts:180:11)
+      at async jsonError (file:///devdrive/github/vault/vault-cloudflare/node_modules/.pnpm/wrangler@4.105.0_@cloudflare+workers-types@4.20260625.1/node_modules/wrangler/templates/middleware/middleware-miniflare3-json-error.ts:22:10)
+      at async drainBody (file:///devdrive/github/vault/vault-cloudflare/node_modules/.pnpm/wrangler@4.105.0_@cloudflare+workers-types@4.20260625.1/node_modules/wrangler/templates/middleware/middleware-ensure-req-body-drained.ts:5:10)
+
+
+[wrangler:info] POST /api/v1/face/enroll 500 Internal Server Error (13230ms)
+✨ Compiled Worker successfully
+⎔ Reloading local server...
+⎔ Local server updated and ready
+[wrangler:info] POST /api/v1/upload 200 OK (1307ms)
+[wrangler:info] POST /api/v1/face/enroll 200 OK (6126ms)
+[wrangler:info] POST /api/v1/face/verify 200 OK (10292ms)
+[wrangler:info] POST /api/v1/upload 200 OK (1186ms)
+[wrangler:info] POST /api/v1/face/enroll 200 OK (4090ms)
+[wrangler:info] POST /api/v1/face/verify 200 OK (2157ms)

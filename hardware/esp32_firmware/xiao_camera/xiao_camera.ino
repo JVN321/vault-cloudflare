@@ -168,9 +168,17 @@ void loop() {
     String cmd = Serial1.readStringUntil('\n');
     cmd.trim();
     if (cmd == "FACE_VERIFY") {
+      Serial.println("📸 Taking photo for FACE_VERIFY...");
+      Serial1.println("DEBUG: Taking photo...");
       digitalWrite(FLASH_LED_PIN, LOW); // Flash on
-      delay(150);
+      delay(150); // Allow exposure to adjust
+      
       camera_fb_t *fb = esp_camera_fb_get();
+      if (!fb) {
+        // Retry once if the frame buffer was busy (common with fb_count = 1)
+        delay(100);
+        fb = esp_camera_fb_get();
+      }
       digitalWrite(FLASH_LED_PIN, HIGH); // Flash off
       
       if (fb) {
