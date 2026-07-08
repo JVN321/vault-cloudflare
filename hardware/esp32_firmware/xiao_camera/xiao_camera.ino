@@ -175,7 +175,7 @@ void loop() {
       
       if (fb) {
         // Dual-upload: Save frame to R2 Image Gallery first
-        uploadFrame("/api/v1/upload?camera_id=1", fb->buf, fb->len);
+        uploadFrame("/api/v1/upload", fb->buf, fb->len);
 
         if (WiFi.status() == WL_CONNECTED) {
           HTTPClient http;

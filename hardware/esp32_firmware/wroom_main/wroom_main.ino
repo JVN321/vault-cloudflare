@@ -13,6 +13,7 @@ Preferences nvs;
 
 // Configs
 unsigned int poll_interval_ms = 2000;
+unsigned int config_poll_interval_ms = 60000;
 unsigned int auto_lock_secs = 30;
 String master_pin_sha256 = "";
 bool motion_detection = false;
@@ -246,7 +247,7 @@ void loop() {
       pollCommands();
     }
     
-    if (now - last_poll_config >= 60000) {
+    if (now - last_poll_config >= config_poll_interval_ms) {
       last_poll_config = now;
       fetchConfig();
     }
