@@ -3,10 +3,10 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 
-const char* ssid = "YOUR_SSID";
-const char* password = "YOUR_PASSWORD";
+const char* ssid = "jvn";
+const char* password = "olalalala";
 String SERVER_URL = "https://vault-cloudflare-8fu.pages.dev";
-String CAMERA_API_KEY = "YOUR_API_KEY";
+String CAMERA_API_KEY = "cameraapisecretkeyafagalglhlia";
 
 // Camera Pin Configurations for XIAO ESP32S3 Sense
 #define PWDN_GPIO_NUM     -1
@@ -26,23 +26,25 @@ String CAMERA_API_KEY = "YOUR_API_KEY";
 #define HREF_GPIO_NUM     47
 #define PCLK_GPIO_NUM     13
 
-#define FLASH_LED_PIN     21 // Verify if XIAO has this flash pin
+#define FLASH_LED_PIN     21 // LOW is ON, HIGH is OFF
 
 bool g_livestream = false;
 unsigned long g_last_frame = 0;
 unsigned long g_last_poll = 0;
 unsigned int poll_interval_ms = 2000;
-const unsigned int LIVESTREAM_INTERVAL_MS = 200; // ~5 fps
+const unsigned int LIVESTREAM_INTERVAL_MS = 200; 
 const unsigned int NORMAL_INTERVAL_MS = 5000;
 
+unsigned long g_last_heartbeat_send = 0;
+
 void setup() {
-  Serial.begin(115200);
-  // Serial1 for communicating with WROOM ESP32
-  // Using pins D6 (43) for TX and D7 (44) for RX on XIAO ESP32-S3
+  Serial.begin(115200); // Debug
+  
+  // Serial1 communicates with ESP32 WROOM via pins 44 (RX) and 43 (TX)
   Serial1.begin(115200, SERIAL_8N1, 44, 43); 
 
   pinMode(FLASH_LED_PIN, OUTPUT);
-  digitalWrite(FLASH_LED_PIN, HIGH);
+  digitalWrite(FLASH_LED_PIN, HIGH); // Start Off (High is Off for active-low onboard LED)
 
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -99,9 +101,11 @@ void pollCommands() {
     DynamicJsonDocument doc(1024);
     DeserializationError error = deserializeJson(doc, payload);
     if (!error) {
-      if (doc["data"]["livestream"].is<bool>()) {
-        g_livestream = doc["data"]["livestream"].as<bool>();
-      } else {
+      if (doc["data"].is<JsonObject>()) {
+         if (doc["data"]["livestream"].is<bool>()) {
+           g_livestream = doc["data"]["livestream"].as<bool>();
+         }
+      } else if (doc["livestream"].is<bool>()) {
         g_livestream = doc["livestream"].as<bool>();
       }
     }
@@ -135,6 +139,7 @@ bool uploadFrame(const char* path, uint8_t* data, size_t len) {
 void loop() {
   unsigned long now = millis();
   
+  // Recover WiFi connection if disconnected
   if (WiFi.status() != WL_CONNECTED) {
     WiFi.disconnect();
     WiFi.begin(ssid, password);
@@ -151,6 +156,17 @@ void loop() {
     }
   }
 
+  // Heartbeat signal back to ESP32 controller
+  if (now - g_last_heartbeat_send >= 3000) { 
+    g_last_heartbeat_send = now;
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial1.println("XIAO_WIFI_OK"); 
+    } else {
+      Serial1.println("XIAO_WIFI_DEAD");
+    }
+  }
+
+  // Livestream handling
   uint32_t frame_interval = g_livestream ? LIVESTREAM_INTERVAL_MS : NORMAL_INTERVAL_MS;
   if (now - g_last_frame >= frame_interval) {
     g_last_frame = now;
@@ -163,26 +179,29 @@ void loop() {
     }
   }
   
-  // Handle commands from WROOM via Serial1
+  // Listen for commands from ESP32 WROOM controller
   if (Serial1.available()) {
     String cmd = Serial1.readStringUntil('\n');
     cmd.trim();
-    if (cmd == "FACE_VERIFY") {
-      Serial.println("📸 Taking photo for FACE_VERIFY...");
-      Serial1.println("DEBUG: Taking photo...");
-      digitalWrite(FLASH_LED_PIN, LOW); // Flash on
-      delay(150); // Allow exposure to adjust
+    
+    // Manual Flash Light triggering
+    if (cmd == "FLASH_ON") {
+      digitalWrite(FLASH_LED_PIN, LOW); // Turn on onboard flash
+    }
+    else if (cmd == "FLASH_OFF") {
+      digitalWrite(FLASH_LED_PIN, HIGH); // Turn off onboard flash
+    }
+    // Face Verification command
+    else if (cmd == "FACE_VERIFY") {
+      digitalWrite(FLASH_LED_PIN, LOW); // Turn on onboard flash
+      delay(50);
       
       camera_fb_t *fb = esp_camera_fb_get();
-      if (!fb) {
-        // Retry once if the frame buffer was busy (common with fb_count = 1)
-        delay(100);
-        fb = esp_camera_fb_get();
-      }
-      digitalWrite(FLASH_LED_PIN, HIGH); // Flash off
+      Serial1.println("photo taken"); // Signal WROOM to turn off 12V LED flash relay immediately
+      
+      digitalWrite(FLASH_LED_PIN, HIGH); // Turn off onboard flash
       
       if (fb) {
-        // Dual-upload: Save frame to R2 Image Gallery first
         uploadFrame("/api/v1/upload", fb->buf, fb->len);
 
         if (WiFi.status() == WL_CONNECTED) {
@@ -221,6 +240,6 @@ void loop() {
       } else {
         Serial1.println("FACE_ERROR: Camera capture failed");
       }
-    } 
+    }
   }
 }

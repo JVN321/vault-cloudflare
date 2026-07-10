@@ -51,3 +51,4 @@ env.SUPABASE_SECRET_KEY ("(hidden)")                                          En
 [wrangler:info] POST /api/v1/upload 200 OK (1186ms)
 [wrangler:info] POST /api/v1/face/enroll 200 OK (4090ms)
 [wrangler:info] POST /api/v1/face/verify 200 OK (2157ms)
+🪵  Logs were written to "/home/jvn/.config/.wrangler/logs/wrangler-2026-07-08_11-39-37_731.log"
