@@ -11,8 +11,8 @@
 #include <SPI.h>
 
 // WiFi & API Configs
-const char* ssid = "jvn";
-const char* password = "olalalala";
+const char* ssid = "IEEE";
+const char* password = "ieee@123";
 String SERVER_URL = "https://vault-cloudflare-8fu.pages.dev";
 String CAMERA_API_KEY = "cameraapisecretkeyafagalglhlia";
 
@@ -36,12 +36,11 @@ std::vector<TempPin> temp_pins;
 // Hardware Pin Definitions
 const int LOCK_RELAY_PIN = 4;   // Channel 1: Solenoid Lock
 const int FLASH_RELAY_PIN = 5;  // Channel 2: 12V LED Strip for camera flash
-const int REED_PIN = 22;        // Door Reed Sensor (detects open/closed)
 
 // FIXED: Swapped Button to 12 to free up 19 for the Keypad matrix
 const int BUTTON_PIN = 12;      
 
-#define BUTTON_ENABLED 0
+#define BUTTON_ENABLED 1
 
 // TFT LCD Pins (ST7735 1.8" TFT)
 #define TFT_CS     15
@@ -71,7 +70,8 @@ bool is_locked = true;
 bool auto_relock_active = false;
 unsigned long auto_relock_at_ms = 0;
 String entered_pin = "";
-bool last_reed_state = false;
+unsigned long last_key_time = 0;
+bool last_key_masked = true;
 unsigned long flash_start_time = 0;
 bool flash_active = false;
 const unsigned long FLASH_TIMEOUT_MS = 10000;
@@ -79,6 +79,7 @@ const unsigned long FLASH_TIMEOUT_MS = 10000;
 bool initial_fetch_done = false;
 unsigned long last_wifi_check = 0;
 bool was_connected = false;
+
 
 // Display States
 enum DisplayState {
@@ -128,6 +129,7 @@ void drawHeader();
 String sha256(const String &input);
 void handleKeypadInput(char key);
 void triggerFaceScan();
+void initDisplayBlocking();
 
 void setup() {
   Serial.begin(115200); 
@@ -146,32 +148,17 @@ void setup() {
   // Initialize Peripheral Pins
   pinMode(LOCK_RELAY_PIN, OUTPUT);
   pinMode(FLASH_RELAY_PIN, OUTPUT);
-  pinMode(REED_PIN, INPUT_PULLUP);
   pinMode(BUTTON_PIN, INPUT_PULLUP); 
 
-  // Default output states
-  digitalWrite(LOCK_RELAY_PIN, LOW);   
-  digitalWrite(FLASH_RELAY_PIN, LOW);  
+  // Default output states (relays are active-low: HIGH = OFF/LOCKED, LOW = ON/UNLOCKED)
+  digitalWrite(LOCK_RELAY_PIN, HIGH);   
+  digitalWrite(FLASH_RELAY_PIN, HIGH);  
   is_locked = true;
 
-  // --- MANUAL TFT HARD RESET ---
-  pinMode(TFT_RST, OUTPUT);
-  digitalWrite(TFT_RST, HIGH);
-  delay(10);
-  digitalWrite(TFT_RST, LOW);  // Force display into reset
-  delay(50);                   // Wait for display to clear
-  digitalWrite(TFT_RST, HIGH); // Wake up display
-  delay(150);                  // Wait for ST7735 controller to boot internally
-  // -----------------------------
-
-  // Initialize TFT LCD
-  tft.initR(INITR_BLACKTAB);  
-  tft.setRotation(1);         
-  tft.setTextWrap(false);     
-  tft.fillScreen(ST77XX_BLACK);
+  // Initialize and Reset TFT LCD (Blocking on setup boot)
+  initDisplayBlocking();
 
   // Set initial display state
-  last_reed_state = (digitalRead(REED_PIN) == HIGH);
   setDisplayState(STATE_STANDBY);
 
   // Load from NVS (Using keys <= 15 chars for compatibility)
@@ -242,6 +229,22 @@ void setDisplayState(DisplayState newState) {
   updateDisplay(true); 
 }
 
+void initDisplayBlocking() {
+  Serial.println("📺 Initializing Display (Blocking)...");
+  pinMode(TFT_RST, OUTPUT);
+  digitalWrite(TFT_RST, HIGH);
+  delay(10);
+  digitalWrite(TFT_RST, LOW);  // Force display into reset
+  delay(50);                   // Wait for display to clear
+  digitalWrite(TFT_RST, HIGH); // Wake up display
+  delay(150);                  // Wait for ST7735 controller to boot internally
+
+  tft.initR(INITR_BLACKTAB);  
+  tft.setRotation(1);         
+  tft.setTextWrap(false);     
+  tft.fillScreen(ST77XX_BLACK);
+}
+
 void drawHeader() {
   bool online = (WiFi.status() == WL_CONNECTED);
   tft.fillRect(0, 0, 160, 24, ST77XX_BLUE);
@@ -267,6 +270,7 @@ void drawHeader() {
 void updateDisplay(bool forceRedraw) {
   static DisplayState last_drawn_state = (DisplayState)-1;
   static int last_pin_length = -1;
+  static bool last_drawn_masked = true;
   static bool last_wifi_online = false;
 
   bool wifi_online = (WiFi.status() == WL_CONNECTED);
@@ -284,17 +288,21 @@ void updateDisplay(bool forceRedraw) {
     
     switch (current_display_state) {
       case STATE_STANDBY:
-        tft.setCursor(10, 35);
+        tft.setCursor(10, 30);
         tft.setTextColor(ST77XX_RED, ST77XX_BLACK);
         tft.setTextSize(2);
         tft.print("LOCKED");
         tft.setTextSize(1);
         tft.setTextColor(ST77XX_WHITE, ST77XX_BLACK);
-        tft.setCursor(10, 60);
+        tft.setCursor(10, 50);
         tft.print("Enter PIN:");
         tft.setTextColor(ST77XX_CYAN, ST77XX_BLACK);
-        tft.setCursor(10, 105);
+        tft.setCursor(10, 88);
         tft.print("Press [A] for Face ID");
+        tft.setCursor(10, 100);
+        tft.print("Press [#] to Submit");
+        tft.setCursor(10, 112);
+        tft.print("Press [*] to Clear");
         break;
 
       case STATE_COUNTDOWN:
@@ -380,18 +388,27 @@ void updateDisplay(bool forceRedraw) {
 
     last_drawn_state = current_display_state;
     last_pin_length = -1; 
+    last_drawn_masked = !last_key_masked;
   }
 
   // 3. Draw dynamic PIN Text (STANDBY only)
   if (current_display_state == STATE_STANDBY) {
-    if ((int)entered_pin.length() != last_pin_length) {
+    if ((int)entered_pin.length() != last_pin_length || last_key_masked != last_drawn_masked || forceRedraw) {
       
-      tft.setCursor(10, 80);
+      tft.setCursor(10, 66);
       tft.setTextColor(ST77XX_YELLOW, ST77XX_BLACK); // The black background securely overwrites old text
       tft.setTextSize(2);
       
       // Copy the entered PIN, then pad it with spaces to overwrite any deleted characters
-      String display_text = entered_pin;
+      String display_text = "";
+      int pin_len = entered_pin.length();
+      for (int i = 0; i < pin_len; i++) {
+        if (i == pin_len - 1 && !last_key_masked) {
+          display_text += entered_pin[i];
+        } else {
+          display_text += "*";
+        }
+      }
       while(display_text.length() < 8) { // 8 is your max PIN length
         display_text += " ";
       }
@@ -399,6 +416,7 @@ void updateDisplay(bool forceRedraw) {
       tft.print(display_text);
       
       last_pin_length = entered_pin.length();
+      last_drawn_masked = last_key_masked;
     }
   }
 
@@ -417,6 +435,26 @@ void updateDisplay(bool forceRedraw) {
       tft.setTextSize(3);
       tft.print(current_sec);
       last_drawn_sec = current_sec;
+    }
+  }
+
+  // 5. Draw dynamic auto-lock Countdown (GRANTED only)
+  if (current_display_state == STATE_GRANTED && auto_relock_active) {
+    int current_sec = (int)((auto_relock_at_ms - millis() + 999) / 1000);
+    if (current_sec < 0) current_sec = 0;
+    static int last_drawn_sec_granted = -1;
+    if (state_changed || forceRedraw) {
+      last_drawn_sec_granted = -1;
+    }
+    if (current_sec != last_drawn_sec_granted) {
+      tft.fillRect(15, 110, 130, 15, ST77XX_BLACK);
+      tft.setCursor(25, 110);
+      tft.setTextColor(ST77XX_YELLOW, ST77XX_BLACK);
+      tft.setTextSize(1);
+      tft.print("Locking in ");
+      tft.print(current_sec);
+      tft.print("s...");
+      last_drawn_sec_granted = current_sec;
     }
   }
 }
@@ -632,10 +670,8 @@ void triggerFaceScan() {
   countdown_start_ms = millis();
   setDisplayState(STATE_COUNTDOWN);
   
-  // Turn on WROOM 12V LED flash strip immediately so user is illuminated
-  digitalWrite(FLASH_RELAY_PIN, HIGH);
-  flash_active = true;
-  flash_start_time = millis();
+  // Do NOT turn on the flash LED yet. It will be turned on when the countdown finishes.
+  flash_active = false;
 }
 
 void handleKeypadInput(char key) {
@@ -646,6 +682,8 @@ void handleKeypadInput(char key) {
   if (key >= '0' && key <= '9') {
     if (entered_pin.length() < 8) {
       entered_pin += key;
+      last_key_time = millis();
+      last_key_masked = false;
       updateDisplay(false); 
     }
   } 
@@ -659,10 +697,14 @@ void handleKeypadInput(char key) {
         queuePinLog(entered_pin);
       }
       entered_pin = "";
+      last_key_time = 0;
+      last_key_masked = true;
     }
   } 
   else if (key == '*') {
     entered_pin = "";
+    last_key_time = 0;
+    last_key_masked = true;
     updateDisplay(false);
   }
   else if (key == 'A') {
@@ -675,7 +717,7 @@ void handleKeypadInput(char key) {
 }
 
 void lockDoor() {
-  digitalWrite(LOCK_RELAY_PIN, LOW); 
+  digitalWrite(LOCK_RELAY_PIN, HIGH); // Active-Low: HIGH = LOCKED
   is_locked = true;
   Serial.println("🔒 Door Solenoid LOCKED");
   
@@ -684,7 +726,7 @@ void lockDoor() {
 }
 
 void unlockDoor() {
-  digitalWrite(LOCK_RELAY_PIN, HIGH); 
+  digitalWrite(LOCK_RELAY_PIN, LOW); // Active-Low: LOW = UNLOCKED
   is_locked = false;
   Serial.println("🔓 Door Solenoid UNLOCKED");
 }
@@ -708,6 +750,12 @@ void toggleDoor() {
 
 void loop() {
   unsigned long now = millis();
+  
+  // Check if we need to mask the last entered PIN digit after 1 second
+  if (!last_key_masked && (now - last_key_time >= 1000)) {
+    last_key_masked = true;
+    updateDisplay(false);
+  }
   
   // 1. Check background network action flags
   if (net_pending_unlock) {
@@ -734,8 +782,17 @@ void loop() {
     updateDisplay(false); // Call updateDisplay to redraw countdown numbers!
     if (millis() - countdown_start_ms >= 3000) {
       setDisplayState(STATE_SCANNING);
+      // Turn on WROOM 12V LED flash strip while taking the picture (Active-Low: LOW = ON)
+      digitalWrite(FLASH_RELAY_PIN, LOW);
+      flash_active = true;
+      flash_start_time = millis();
       Serial2.println("FACE_VERIFY");
     }
+  }
+
+  // Handle Granted State Countdown Refresh
+  if (current_display_state == STATE_GRANTED) {
+    updateDisplay(false);
   }
 
 
@@ -773,9 +830,9 @@ void loop() {
     auto_relock_active = false;
   }
 
-  // 6. Turn off Flash relay if timeout exceeded (with safety return to standby)
+  // 6. Turn off Flash relay if timeout exceeded (with safety return to standby, Active-Low: HIGH = OFF)
   if (flash_active && (millis() - flash_start_time >= FLASH_TIMEOUT_MS)) {
-    digitalWrite(FLASH_RELAY_PIN, LOW); 
+    digitalWrite(FLASH_RELAY_PIN, HIGH); 
     flash_active = false;
     if (current_display_state == STATE_SCANNING || current_display_state == STATE_COUNTDOWN || current_display_state == STATE_VERIFYING) {
       setDisplayState(STATE_STANDBY);
@@ -825,7 +882,8 @@ void loop() {
     // Only process face verification results if we are actually scanning or verifying
     if (current_display_state == STATE_SCANNING || current_display_state == STATE_VERIFYING) {
       if (resp == "photo taken") {
-        digitalWrite(FLASH_RELAY_PIN, LOW); 
+        // Turn off 12V LED flash strip immediately (Active-Low: HIGH = OFF)
+        digitalWrite(FLASH_RELAY_PIN, HIGH); 
         flash_active = false;
         setDisplayState(STATE_VERIFYING); // Transition to Verifying State
       } 

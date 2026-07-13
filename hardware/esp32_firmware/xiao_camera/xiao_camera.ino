@@ -3,8 +3,8 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 
-const char* ssid = "jvn";
-const char* password = "olalalala";
+const char* ssid = "IEEE";
+const char* password = "ieee@123";
 String SERVER_URL = "https://vault-cloudflare-8fu.pages.dev";
 String CAMERA_API_KEY = "cameraapisecretkeyafagalglhlia";
 
