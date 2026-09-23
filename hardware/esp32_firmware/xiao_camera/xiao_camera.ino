@@ -1,5 +1,6 @@
 #include "esp_camera.h"
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 
@@ -38,7 +39,7 @@ const unsigned int NORMAL_INTERVAL_MS = 5000;
 unsigned long g_last_heartbeat_send = 0;
 
 void setup() {
-  Serial.begin(115200); // Debug
+  Serial.begin(115200); // Debug USB
   
   // Serial1 communicates with ESP32 WROOM via pins 44 (RX) and 43 (TX)
   Serial1.begin(115200, SERIAL_8N1, 44, 43); 
@@ -75,6 +76,7 @@ void setup() {
 
   if (esp_camera_init(&config) != ESP_OK) { 
     Serial.println("❌ Cam Init Fail"); 
+    Serial1.println("CAM_INIT_FAIL");
     return; 
   }
 
@@ -91,10 +93,13 @@ void setup() {
 
 void pollCommands() {
   if (WiFi.status() != WL_CONNECTED) return;
+  WiFiClientSecure client;
+  client.setInsecure();
   HTTPClient http;
   String url = SERVER_URL + "/api/v1/esp/commands/pending";
-  http.begin(url);
+  http.begin(client, url);
   http.addHeader("X-API-Key", CAMERA_API_KEY);
+  http.setTimeout(4000);
   int httpCode = http.GET();
   if (httpCode == 200) {
     String payload = http.getString();
@@ -115,21 +120,24 @@ void pollCommands() {
 
 bool uploadFrame(const char* path, uint8_t* data, size_t len) {
   if (WiFi.status() != WL_CONNECTED) {
-    Serial1.println("UPLOAD_ERROR: No WiFi");
+    Serial.println("UPLOAD_ERROR: No WiFi");
     return false;
   }
+  WiFiClientSecure client;
+  client.setInsecure();
   HTTPClient http;
   String url = SERVER_URL + path;
-  http.begin(url);
+  http.begin(client, url);
   http.addHeader("Content-Type", "image/jpeg");
   http.addHeader("X-API-Key", CAMERA_API_KEY);
+  http.setTimeout(10000); // 10 second timeout for image upload
   int code = http.POST(data, len);
   bool ok = (code == 200);
   if (!ok) {
     if (code < 0) {
-      Serial1.println("UPLOAD_ERROR: " + http.errorToString(code));
+      Serial.println("UPLOAD_ERROR: " + http.errorToString(code));
     } else {
-      Serial1.println("UPLOAD_FAIL: HTTP " + String(code));
+      Serial.println("UPLOAD_FAIL: HTTP " + String(code));
     }
   }
   http.end();
@@ -194,21 +202,30 @@ void loop() {
     // Face Verification command
     else if (cmd == "FACE_VERIFY") {
       digitalWrite(FLASH_LED_PIN, LOW); // Turn on onboard flash
-      delay(50);
+      delay(150); // Increased delay so sensor auto-exposure and lighting stabilize
       
       camera_fb_t *fb = esp_camera_fb_get();
-      Serial1.println("photo taken"); // Signal WROOM to turn off 12V LED flash relay immediately
+      if (!fb) {
+        // Retry once if frame buffer was momentarily busy
+        delay(80);
+        fb = esp_camera_fb_get();
+      }
       
+      Serial1.println("photo taken"); // Signal WROOM to turn off 12V LED flash relay immediately
       digitalWrite(FLASH_LED_PIN, HIGH); // Turn off onboard flash
       
       if (fb) {
-        uploadFrame("/api/v1/upload", fb->buf, fb->len);
-
+        // Directly send to /api/v1/face/verify:
+        // The backend automatically stores the image into Supabase Storage and D1 images gallery,
+        // and performs Face++ verification in a single efficient HTTP call (no double-upload needed).
         if (WiFi.status() == WL_CONNECTED) {
+          WiFiClientSecure client;
+          client.setInsecure();
           HTTPClient http;
-          http.begin(SERVER_URL + "/api/v1/face/verify");
+          http.begin(client, SERVER_URL + "/api/v1/face/verify");
           http.addHeader("Content-Type", "image/jpeg");
           http.addHeader("X-API-Key", CAMERA_API_KEY);
+          http.setTimeout(10000); // 10 second timeout
           int code = http.POST(fb->buf, fb->len);
           if (code > 0) {
             if (code == 200) {

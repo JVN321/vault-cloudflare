@@ -352,6 +352,32 @@ app.post("/api/v1/face/verify", async (c) => {
   if (!body.byteLength) return err("Empty image body");
   const imageBase64 = arrayBufferToBase64(body);
 
+  // Automatically archive every verification attempt to Supabase Storage and D1 images table
+  const objectKey = `images/${Date.now()}-${crypto.randomUUID()}.jpg`;
+  let imageId: number | null = null;
+  try {
+    const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_SECRET_KEY);
+    const { error: uploadError } = await supabase.storage.from("vault-images").upload(objectKey, body, {
+      contentType: "image/jpeg",
+      upsert: true,
+    });
+    if (!uploadError) {
+      const [imgRecord] = await db
+        .insert(schema.images)
+        .values({
+          cameraId: null,
+          objectKey,
+          motionDetected: false,
+          fileSize: body.byteLength,
+          mimeType: "image/jpeg",
+        })
+        .returning();
+      if (imgRecord) imageId = imgRecord.id;
+    }
+  } catch (storageErr) {
+    console.error("Failed to archive verification image:", storageErr);
+  }
+
   const facesetId = map["faceset_id"] || "VAULT_FACESET";
   const threshold = Number(map["face_confidence_threshold"] ?? "40");
 
@@ -366,7 +392,7 @@ app.post("/api/v1/face/verify", async (c) => {
     if (e.message !== "EMPTY_FACESET") throw e;
   }
 
-  type FaceResult = { confidence: number; user_id?: string };
+  type FaceResult = { confidence: number; user_id?: string; face_token?: string };
   const results = result.results as FaceResult[] | undefined;
   let granted = false;
   let identifiedName = "Unknown";
@@ -419,6 +445,8 @@ app.post("/api/v1/face/verify", async (c) => {
     granted,
     name: identifiedName,
     confidence: results?.[0]?.confidence ?? 0,
+    imageId,
+    objectKey: imageId ? objectKey : null,
   });
 });
 
