@@ -74,7 +74,7 @@ unsigned long last_key_time = 0;
 bool last_key_masked = true;
 unsigned long flash_start_time = 0;
 bool flash_active = false;
-const unsigned long FLASH_TIMEOUT_MS = 10000;
+const unsigned long FLASH_TIMEOUT_MS = 8000;
 
 bool initial_fetch_done = false;
 unsigned long last_wifi_check = 0;
@@ -88,6 +88,7 @@ enum DisplayState {
   STATE_SCANNING,   // Xiao capturing photo
   STATE_VERIFYING,  // Xiao verifying face
   STATE_GRANTED,
+  STATE_NO_FACE,
   STATE_DENIED,
   STATE_ENROLLING
 };
@@ -224,6 +225,7 @@ void setDisplayState(DisplayState newState) {
     case STATE_VERIFYING: Serial.println("VERIFYING (FACE ID)"); break;
     case STATE_GRANTED:   Serial.println("ACCESS GRANTED"); break;
     case STATE_DENIED:    Serial.println("ACCESS DENIED"); break;
+    case STATE_NO_FACE:   Serial.println("NO FACE DETECTED"); break;
     case STATE_ENROLLING: Serial.println("FACE ENROLLING"); break;
   }
   updateDisplay(true); 
@@ -366,10 +368,24 @@ void updateDisplay(bool forceRedraw) {
         tft.setTextSize(1);
         tft.setTextColor(ST77XX_WHITE, ST77XX_BLACK);
         tft.setCursor(25, 70);
-        tft.print("Invalid Entry!");
+        tft.print("Not authorized");
         tft.setTextColor(ST77XX_RED, ST77XX_BLACK);
         tft.setCursor(25, 90);
-        tft.print("Access Rejected");
+        tft.print("Locked");
+        break;
+
+      case STATE_NO_FACE:
+        tft.setTextColor(ST77XX_YELLOW, ST77XX_BLACK);
+        tft.setCursor(20, 40);
+        tft.setTextSize(2);
+        tft.print("NO FACE");
+        tft.setTextSize(1);
+        tft.setTextColor(ST77XX_WHITE, ST77XX_BLACK);
+        tft.setCursor(20, 70);
+        tft.print("Face not detected");
+        tft.setTextColor(ST77XX_RED, ST77XX_BLACK);
+        tft.setCursor(25, 90);
+        tft.print("Locked");
         break;
 
       case STATE_ENROLLING:
@@ -838,9 +854,15 @@ void loop() {
       setDisplayState(STATE_STANDBY);
     }
   }
+  if ((current_display_state == STATE_SCANNING || current_display_state == STATE_VERIFYING) &&
+      (millis() - display_state_change_ms >= FLASH_TIMEOUT_MS)) {
+    digitalWrite(FLASH_RELAY_PIN, HIGH);
+    flash_active = false;
+    setDisplayState(STATE_STANDBY);
+  }
 
   // 7. Automatic transition back to standby screen from temporary screen states (Granted/Denied)
-  if (current_display_state == STATE_DENIED && (millis() - display_state_change_ms >= 3000)) {
+  if ((current_display_state == STATE_DENIED || current_display_state == STATE_NO_FACE) && (millis() - display_state_change_ms >= 2500)) {
     setDisplayState(STATE_STANDBY);
   }
   if (current_display_state == STATE_ENROLLING && (millis() - display_state_change_ms >= 10000)) {
@@ -890,10 +912,13 @@ void loop() {
       else if (resp == "FACE_SUCCESS") {
         unlockWithTimer();
       } 
-      else if (resp == "FACE_FAIL") {
+      else if (resp == "FACE_NO_FACE") {
+        setDisplayState(STATE_NO_FACE);
+      }
+      else if (resp == "FACE_NOT_AUTHORIZED" || resp == "FACE_FAIL") {
         setDisplayState(STATE_DENIED);
       } 
-      else if (resp == "FACE_ERROR" || resp.startsWith("FACE_NET_ERROR") || resp.startsWith("UPLOAD_")) {
+      else if (resp.startsWith("FACE_ERROR") || resp.startsWith("FACE_NET_ERROR") || resp.startsWith("UPLOAD_")) {
         setDisplayState(STATE_DENIED);
       }
     } 

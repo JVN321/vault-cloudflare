@@ -3,7 +3,7 @@ import { eq, and, gt, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { createClient } from "@supabase/supabase-js";
 import * as schema from "../../drizzle/schema";
-import { Env } from "../types";
+import type { Env } from "../types";
 import {
   ok,
   err,
@@ -196,7 +196,7 @@ app.get("/api/v1/esp/commands/pending", async (c) => {
 app.post("/api/v1/esp/commands/:id/ack", async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const id = Number(c.req.param("id"));
-  const body = await c.req.json<{ success?: boolean }>().catch(() => ({}));
+  const body = await c.req.json<{ success?: boolean }>().catch((): { success?: boolean } => ({}));
   const [cmd] = await db
     .update(schema.commands)
     .set({
@@ -306,8 +306,8 @@ app.post("/api/v1/face/enroll", async (c) => {
     image_base64: imageBase64,
   });
   const faces = detected.faces as Array<{ face_token: string }> | undefined;
-  if (!faces?.length) return err("No face detected in image");
-  const faceToken = faces[0].face_token;
+  const faceToken = faces?.[0]?.face_token;
+  if (!faceToken) return err("No face detected in image");
 
   // Add to faceset (create if needed)
   const addResult = await facePlusPlus("faceset/addface", faceApiKey, faceApiSecret, {
@@ -343,11 +343,6 @@ app.post("/api/v1/face/verify", async (c) => {
   const map: Record<string, string> = { ...DEFAULT_SETTINGS };
   for (const row of rows) map[row.key] = row.value;
 
-  const faceApiKey = map["faceplusplusApiKey"] || c.env.FACEPLUSPLUS_API_KEY;
-  const faceApiSecret = map["faceplusplusApiSecret"] || c.env.FACEPLUSPLUS_API_SECRET;
-  if (!faceApiKey || !faceApiSecret)
-    return err("Face++ API credentials not configured", 503);
-
   const body = await c.req.arrayBuffer();
   if (!body.byteLength) return err("Empty image body");
   const imageBase64 = arrayBufferToBase64(body);
@@ -361,27 +356,36 @@ app.post("/api/v1/face/verify", async (c) => {
       contentType: "image/jpeg",
       upsert: true,
     });
-    if (!uploadError) {
-      const [imgRecord] = await db
-        .insert(schema.images)
-        .values({
-          cameraId: null,
-          objectKey,
-          motionDetected: false,
-          fileSize: body.byteLength,
-          mimeType: "image/jpeg",
-        })
-        .returning();
-      if (imgRecord) imageId = imgRecord.id;
-    }
+    if (uploadError) throw new Error(uploadError.message);
+    const [imgRecord] = await db
+      .insert(schema.images)
+      .values({
+        cameraId: null,
+        objectKey,
+        motionDetected: false,
+        fileSize: body.byteLength,
+        mimeType: "image/jpeg",
+      })
+      .returning();
+    if (imgRecord) imageId = imgRecord.id;
   } catch (storageErr) {
     console.error("Failed to archive verification image:", storageErr);
+    return err("Failed to archive verification image", 500);
+  }
+
+  const imageRef = { imageId, objectKey };
+  const faceApiKey = map["faceplusplusApiKey"] || c.env.FACEPLUSPLUS_API_KEY;
+  const faceApiSecret = map["faceplusplusApiSecret"] || c.env.FACEPLUSPLUS_API_SECRET;
+  if (!faceApiKey || !faceApiSecret) {
+    await db.insert(schema.accessLogs).values({ method: "FACE", success: false, timestamp: new Date().toISOString() });
+    return ok({ granted: false, status: "FACE_ERROR", message: "Face verification unavailable", ...imageRef });
   }
 
   const facesetId = map["faceset_id"] || "VAULT_FACESET";
   const threshold = Number(map["face_confidence_threshold"] ?? "40");
 
   let result: any = { results: [] };
+  let noFaceDetected = false;
   try {
     result = await facePlusPlus("search", faceApiKey, faceApiSecret, {
       outer_id: facesetId,
@@ -389,7 +393,22 @@ app.post("/api/v1/face/verify", async (c) => {
       return_result_count: "5",
     });
   } catch (e: any) {
-    if (e.message !== "EMPTY_FACESET") throw e;
+    if (e.message === "NO_FACE_FOUND") {
+      noFaceDetected = true;
+    } else if (e.message !== "EMPTY_FACESET") {
+      console.error("Face verification failed:", e);
+      await db.insert(schema.accessLogs).values({ method: "FACE", success: false, timestamp: new Date().toISOString() });
+      return ok({ granted: false, status: "FACE_ERROR", message: "Face verification unavailable", ...imageRef });
+    }
+  }
+
+  if (result.faces && Array.isArray(result.faces) && result.faces.length === 0) {
+    noFaceDetected = true;
+  }
+
+  if (noFaceDetected) {
+    await db.insert(schema.accessLogs).values({ method: "FACE", success: false, timestamp: new Date().toISOString() });
+    return ok({ granted: false, status: "NO_FACE", message: "Face not detected", ...imageRef });
   }
 
   type FaceResult = { confidence: number; user_id?: string; face_token?: string };
@@ -443,10 +462,11 @@ app.post("/api/v1/face/verify", async (c) => {
 
   return ok({
     granted,
+    status: granted ? "AUTHORIZED" : "NOT_AUTHORIZED",
+    message: granted ? "Authorized" : "Not authorized",
     name: identifiedName,
     confidence: results?.[0]?.confidence ?? 0,
-    imageId,
-    objectKey: imageId ? objectKey : null,
+    ...imageRef,
   });
 });
 

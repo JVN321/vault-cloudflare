@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
-  ShieldAlert, Camera, Wifi, Unlock, BellOff, Lock, Users, DoorOpen,
+  ShieldAlert, Camera, Wifi, Unlock, BellOff, Lock, Users, DoorOpen, UserPlus,
   AlertTriangle, ArrowDownLeft, ArrowUpRight, Play, Square, VideoOff, Thermometer, Droplets,
 } from "lucide-react";
 import { TopBar } from "@/components/vault/top-bar";
@@ -11,6 +11,7 @@ import { Avatar } from "@/components/vault/status-pill";
 import { cn } from "@/lib/utils";
 import { logsApi, sensorApi, imagesApi, livestreamApi, commandsApi } from "@/lib/api";
 import type { AccessLogEntry } from "@/lib/types";
+import { AddUserDialog } from "@/components/vault/add-user-dialog";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard · V.A.U.L.T" }] }),
@@ -35,6 +36,20 @@ function Dashboard() {
     queryFn: () => sensorApi.latest(),
     refetchInterval: 10_000,
   });
+
+  const { data: recentCaptures = [] } = useQuery({
+    queryKey: ["dashboard-recent-captures"],
+    queryFn: () => imagesApi.list(8, false),
+    refetchInterval: 5_000,
+  });
+
+  const [enrollOpen, setEnrollOpen] = useState(false);
+  const [enrollImageKey, setEnrollImageKey] = useState<string | null>(null);
+
+  function openEnrollment(objectKey: string | null = null) {
+    setEnrollImageKey(objectKey);
+    setEnrollOpen(true);
+  }
 
   const commandMutation = useMutation({
     mutationFn: (type: "LOCK" | "UNLOCK" | "PULSE") => commandsApi.send(type),
@@ -103,6 +118,26 @@ function Dashboard() {
               </span>
             </div>
             <CameraStream stamp={stamp} />
+
+            <div className="border-t border-border px-3 py-3">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="font-mono-data text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">Recent Captures</span>
+                {recentCaptures.length > 0 && (
+                  <button onClick={() => openEnrollment(recentCaptures[0]?.objectKey ?? null)} className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-primary hover:underline">
+                    <UserPlus className="h-3.5 w-3.5" /> Enroll latest
+                  </button>
+                )}
+              </div>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {recentCaptures.map((capture) => (
+                  <button key={capture.objectKey} onClick={() => openEnrollment(capture.objectKey)} className="group relative h-16 w-24 shrink-0 overflow-hidden rounded-md border border-border bg-muted" title="Add this capture as a user">
+                    <img src={imagesApi.getUrl(capture.objectKey)} alt="Recent capture" className="h-full w-full object-cover transition group-hover:scale-105" />
+                    <span className="absolute inset-x-0 bottom-0 bg-black/70 px-1 py-0.5 text-[9px] text-white">Add as user</span>
+                  </button>
+                ))}
+                {recentCaptures.length === 0 && <span className="py-3 text-xs text-muted-foreground">No camera captures yet.</span>}
+              </div>
+            </div>
 
             {/* KPI strip */}
             <div className="grid grid-cols-2 gap-3 border-t border-border bg-muted/30 p-3 sm:grid-cols-4">
@@ -184,6 +219,7 @@ function Dashboard() {
           />
         </div>
       </div>
+      <AddUserDialog open={enrollOpen} onOpenChange={setEnrollOpen} initialObjectKey={enrollImageKey} />
     </div>
   );
 }

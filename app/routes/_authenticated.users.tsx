@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Search, Plus, MoreHorizontal, Trash2, Save, Loader2, Image as ImageIcon } from "lucide-react";
+import { Search, Plus, MoreHorizontal, Trash2, Save, Loader2 } from "lucide-react";
 import { TopBar } from "@/components/vault/top-bar";
 import { StatusPill, Avatar } from "@/components/vault/status-pill";
 import { Button } from "@/components/ui/button";
@@ -10,11 +10,11 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { usersApi, imagesApi } from "@/lib/api";
+import { usersApi } from "@/lib/api";
 import type { VaultUser, AuthMethod } from "@/lib/types";
 import { toast } from "sonner";
+import { AddUserDialog } from "@/components/vault/add-user-dialog";
 
 export const Route = createFileRoute("/_authenticated/users")({
   head: () => ({ meta: [{ title: "Users · V.A.U.L.T" }] }),
@@ -27,97 +27,6 @@ const methodLabels: Record<string, string> = {
   BARCODE: "Barcode",
   RFID: "RFID",
 };
-
-function AddUserDialog({ open, onOpenChange }: { open: boolean, onOpenChange: (b: boolean) => void }) {
-  const qc = useQueryClient();
-  const [name, setName] = useState("");
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
-
-  const { data: recentImages = [], isLoading: imagesLoading } = useQuery({
-    queryKey: ["recent-images-enroll"],
-    queryFn: () => imagesApi.list(10, false),
-    enabled: open,
-  });
-
-  const enrollMutation = useMutation({
-    mutationFn: () => usersApi.enrollFace(name, selectedImage!),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["users"] });
-      toast.success("User enrolled successfully!");
-      onOpenChange(false);
-      setName("");
-      setSelectedImage(null);
-    },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "Enrollment failed"),
-  });
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px]">
-        <DialogHeader>
-          <DialogTitle>Enroll New User</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-6 pt-4">
-          <label className="block space-y-1.5">
-            <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">User Full Name</span>
-            <Input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Jane Doe"
-              className="h-10"
-            />
-          </label>
-          
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Select Recent Camera Image</span>
-              <Button variant="ghost" size="sm" className="h-6 text-xs px-2" onClick={() => qc.invalidateQueries({queryKey: ["recent-images-enroll"]})}>Refresh</Button>
-            </div>
-            
-            {imagesLoading ? (
-              <div className="flex justify-center p-4"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
-            ) : recentImages.length === 0 ? (
-              <div className="rounded-lg border border-border border-dashed p-6 text-center text-sm text-muted-foreground">
-                <ImageIcon className="mx-auto mb-2 h-6 w-6 opacity-40" />
-                No recent images. Ask the user to stand in front of the camera.
-              </div>
-            ) : (
-              <div className="grid grid-cols-5 gap-2 max-h-[200px] overflow-y-auto pr-1">
-                {recentImages.map((img) => (
-                  <div
-                    key={img.objectKey}
-                    onClick={() => setSelectedImage(img.objectKey)}
-                    className={`relative cursor-pointer overflow-hidden rounded-md border-2 transition-all ${selectedImage === img.objectKey ? "border-primary shadow-sm" : "border-transparent opacity-70 hover:opacity-100"}`}
-                  >
-                    <div className="aspect-square bg-muted">
-                      <img src={imagesApi.getUrl(img.objectKey)} alt="Capture" className="h-full w-full object-cover" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-          
-          <div className="rounded-lg border border-warning/20 bg-warning/10 p-3 text-xs text-warning-foreground">
-            <strong>Note:</strong> The new user will be created with "INACTIVE" status by default for security. You can enable their access from the user list.
-          </div>
-
-          <div className="flex justify-end gap-3 pt-4">
-            <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button 
-              disabled={!name || !selectedImage || enrollMutation.isPending}
-              onClick={() => enrollMutation.mutate()}
-              className="gap-2"
-            >
-              {enrollMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-              Enroll Face
-            </Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 function UsersPage() {
   const qc = useQueryClient();

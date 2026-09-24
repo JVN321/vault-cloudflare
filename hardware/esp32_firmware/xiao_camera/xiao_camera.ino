@@ -70,7 +70,7 @@ void setup() {
   config.frame_size = FRAMESIZE_VGA;
   config.pixel_format = PIXFORMAT_JPEG;
   config.grab_mode = CAMERA_GRAB_LATEST;
-  config.fb_count = 1;
+  config.fb_count = 2;
   config.fb_location = CAMERA_FB_IN_PSRAM;
   config.jpeg_quality = 10;
 
@@ -175,14 +175,11 @@ void loop() {
   }
 
   // Livestream handling
-  uint32_t frame_interval = g_livestream ? LIVESTREAM_INTERVAL_MS : NORMAL_INTERVAL_MS;
-  if (now - g_last_frame >= frame_interval) {
+  if (g_livestream && now - g_last_frame >= LIVESTREAM_INTERVAL_MS) {
     g_last_frame = now;
     camera_fb_t *fb = esp_camera_fb_get();
     if (fb) {
-      if (g_livestream) {
-        uploadFrame("/api/v1/esp/livestream", fb->buf, fb->len);
-      }
+      uploadFrame("/api/v1/esp/livestream", fb->buf, fb->len);
       esp_camera_fb_return(fb);
     }
   }
@@ -204,17 +201,19 @@ void loop() {
       digitalWrite(FLASH_LED_PIN, LOW); // Turn on onboard flash
       delay(150); // Increased delay so sensor auto-exposure and lighting stabilize
       
-      camera_fb_t *fb = esp_camera_fb_get();
-      if (!fb) {
-        // Retry once if frame buffer was momentarily busy
-        delay(80);
+      camera_fb_t *stale = esp_camera_fb_get();
+      if (stale) esp_camera_fb_return(stale);
+
+      camera_fb_t *fb = nullptr;
+      for (int attempt = 0; attempt < 3 && !fb; attempt++) {
         fb = esp_camera_fb_get();
+        if (!fb) delay(80);
       }
-      
-      Serial1.println("photo taken"); // Signal WROOM to turn off 12V LED flash relay immediately
+
       digitalWrite(FLASH_LED_PIN, HIGH); // Turn off onboard flash
-      
+
       if (fb) {
+        Serial1.println("photo taken"); // Signal WROOM to turn off 12V LED flash relay immediately
         // Directly send to /api/v1/face/verify:
         // The backend automatically stores the image into Supabase Storage and D1 images gallery,
         // and performs Face++ verification in a single efficient HTTP call (no double-upload needed).
@@ -235,27 +234,32 @@ void loop() {
               bool granted = false;
               if (doc["data"].is<JsonObject>()) {
                 granted = doc["data"]["granted"].as<bool>();
+                String status = doc["data"]["status"].as<String>();
+                if (granted) Serial1.println("FACE_SUCCESS");
+                else if (status == "NO_FACE") Serial1.println("FACE_NO_FACE");
+                else if (status == "NOT_AUTHORIZED") Serial1.println("FACE_NOT_AUTHORIZED");
+                else Serial1.println("FACE_ERROR_HTTP");
               } else {
                 granted = doc["granted"].as<bool>();
-              }
-              if (granted) {
-                Serial1.println("FACE_SUCCESS");
-              } else {
-                Serial1.println("FACE_FAIL");
+                String status = doc["status"].as<String>();
+                if (granted) Serial1.println("FACE_SUCCESS");
+                else if (status == "NO_FACE") Serial1.println("FACE_NO_FACE");
+                else if (status == "NOT_AUTHORIZED") Serial1.println("FACE_NOT_AUTHORIZED");
+                else Serial1.println("FACE_ERROR_HTTP");
               }
             } else {
-              Serial1.println("FACE_ERROR: HTTP " + String(code));
+              Serial1.println("FACE_ERROR_HTTP");
             }
           } else {
-            Serial1.println("FACE_NET_ERROR: " + http.errorToString(code));
+            Serial1.println("FACE_ERROR_NET");
           }
           http.end();
         } else {
-          Serial1.println("FACE_NET_ERROR: No WiFi");
+          Serial1.println("FACE_ERROR_NET");
         }
         esp_camera_fb_return(fb);
       } else {
-        Serial1.println("FACE_ERROR: Camera capture failed");
+        Serial1.println("FACE_ERROR_CAM");
       }
     }
   }

@@ -3,13 +3,14 @@ import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Download, Trash2, ImageIcon, AlertTriangle, Filter,
-  RefreshCw, Clock, HardDrive, Zap, Video, VideoOff, Radio,
+  RefreshCw, Clock, HardDrive, Zap, Video, VideoOff, Radio, UserPlus,
 } from "lucide-react";
 import { TopBar } from "@/components/vault/top-bar";
 import { imagesApi, livestreamApi } from "@/lib/api";
 import type { ImageMeta } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { AddUserDialog } from "@/components/vault/add-user-dialog";
 
 export const Route = createFileRoute("/_authenticated/images")({
   head: () => ({ meta: [{ title: "Images · V.A.U.L.T" }] }),
@@ -154,6 +155,8 @@ function LivestreamPanel() {
 // ---------------------------------------------------------------------------
 function ImagesPage() {
   const [filter, setFilter] = useState<FilterType>("all");
+  const [enrollOpen, setEnrollOpen] = useState(false);
+  const [enrollImageKey, setEnrollImageKey] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
   const { data: images = [], isLoading, refetch } = useQuery({
@@ -257,6 +260,7 @@ function ImagesPage() {
               <ImageCard
                 key={img.id}
                 img={img}
+                onEnroll={() => { setEnrollImageKey(img.objectKey); setEnrollOpen(true); }}
                 onDelete={() => deleteMutation.mutate(img.id)}
                 deleting={deleteMutation.isPending && deleteMutation.variables === img.id}
               />
@@ -269,6 +273,7 @@ function ImagesPage() {
           Images auto-deleted per retention policy · Configurable in Settings → Data Retention
         </p>
       </div>
+      <AddUserDialog open={enrollOpen} onOpenChange={setEnrollOpen} initialObjectKey={enrollImageKey} />
     </div>
   );
 }
@@ -293,9 +298,10 @@ function StatChip({
 }
 
 function ImageCard({
-  img, onDelete, deleting,
+  img, onEnroll, onDelete, deleting,
 }: {
   img: ImageMeta;
+  onEnroll: () => void;
   onDelete: () => void;
   deleting: boolean;
 }) {
@@ -345,6 +351,14 @@ function ImageCard({
           >
             <Download className="h-4 w-4" />
           </a>
+          <button
+            id={`enroll-img-${img.id}`}
+            onClick={onEnroll}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-success text-success-foreground shadow hover:brightness-110 transition"
+            title="Enroll as user"
+          >
+            <UserPlus className="h-4 w-4" />
+          </button>
           <button
             id={`delete-img-${img.id}`}
             onClick={onDelete}
