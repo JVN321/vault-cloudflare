@@ -70,12 +70,19 @@ void setup() {
   config.frame_size = FRAMESIZE_VGA;
   config.pixel_format = PIXFORMAT_JPEG;
   config.grab_mode = CAMERA_GRAB_LATEST;
-  config.fb_count = 2;
+  // The board/core combination used here fails camera init when two VGA
+  // frame buffers are allocated, even though PSRAM is present. Keep the
+  // known-good single-buffer configuration; capture retries handle transient
+  // frame acquisition failures.
+  config.fb_count = 1;
   config.fb_location = CAMERA_FB_IN_PSRAM;
   config.jpeg_quality = 10;
 
-  if (esp_camera_init(&config) != ESP_OK) { 
-    Serial.println("❌ Cam Init Fail"); 
+  esp_err_t camera_error = esp_camera_init(&config);
+  if (camera_error != ESP_OK) {
+    Serial.printf("Cam Init Fail: 0x%lx (%s), PSRAM=%s, free=%u\n",
+      static_cast<unsigned long>(camera_error), esp_err_to_name(camera_error),
+      psramFound() ? "yes" : "no", ESP.getFreeHeap());
     Serial1.println("CAM_INIT_FAIL");
     return; 
   }

@@ -900,9 +900,17 @@ void loop() {
       Serial.print("🎥 Received from XIAO: ");
       Serial.println(resp);
     }
+
+    // XIAO ESP32-S3 ROM boot output shares UART0 with the controller link.
+    // Ignore boot text and binary noise; only application protocol messages
+    // below are meaningful to the gate state machine.
+    bool isFaceResponse = resp == "photo taken" || resp == "FACE_SUCCESS" ||
+      resp == "FACE_NO_FACE" || resp == "FACE_NOT_AUTHORIZED" ||
+      resp == "FACE_FAIL" || resp.startsWith("FACE_ERROR") ||
+      resp.startsWith("FACE_NET_ERROR") || resp.startsWith("UPLOAD_");
     
     // Only process face verification results if we are actually scanning or verifying
-    if (current_display_state == STATE_SCANNING || current_display_state == STATE_VERIFYING) {
+    if ((current_display_state == STATE_SCANNING || current_display_state == STATE_VERIFYING) && isFaceResponse) {
       if (resp == "photo taken") {
         // Turn off 12V LED flash strip immediately (Active-Low: HIGH = OFF)
         digitalWrite(FLASH_RELAY_PIN, HIGH); 
