@@ -9,10 +9,11 @@
 #include <Adafruit_GFX.h>    // Core graphics library
 #include <Adafruit_ST7735.h> // Hardware-specific library for ST7735
 #include <SPI.h>
+#include "driver/gpio.h"
 
 // WiFi & API Configs
-const char* ssid = "IEEE";
-const char* password = "ieee@123";
+const char* ssid = "realme";
+const char* password = "123456789";
 String SERVER_URL = "https://vault-cloudflare-8fu.pages.dev";
 String CAMERA_API_KEY = "cameraapisecretkeyafagalglhlia";
 
@@ -131,10 +132,13 @@ String sha256(const String &input);
 void handleKeypadInput(char key);
 void triggerFaceScan();
 void initDisplayBlocking();
+void testKeypadWiring();
+char scanKeypadHardware();
+void checkKeypad();
 
 void setup() {
   Serial.begin(115200); 
-  Serial.setTimeout(50); 
+  Serial.setTimeout(10); 
   
   while (!Serial) {
     delay(10); 
@@ -142,8 +146,9 @@ void setup() {
   
   Serial.println("--- Gate Controller Booting ---");
   
-  // Serial2 for communicating with XIAO ESP32
-  Serial2.begin(115200, SERIAL_8N1, 16, 17); 
+  // Serial2 for communicating with XIAO ESP32 (9600 baud for stable signal integrity over jumper wires)
+  pinMode(16, INPUT_PULLUP);
+  Serial2.begin(9600, SERIAL_8N1, 16, 17); 
   Serial2.setTimeout(50); 
 
   // Initialize Peripheral Pins
@@ -158,6 +163,19 @@ void setup() {
 
   // Initialize and Reset TFT LCD (Blocking on setup boot)
   initDisplayBlocking();
+
+  // Configure keypad debouncing and pins
+  keypad.setDebounceTime(20);
+  keypad.setHoldTime(1000);
+  for (byte r = 0; r < KEYPAD_ROWS; r++) {
+    pinMode(rowPins[r], INPUT_PULLUP);
+  }
+  for (byte c = 0; c < KEYPAD_COLS; c++) {
+    pinMode(colPins[c], INPUT_PULLUP);
+  }
+
+  // Print initial keypad hardware diagnostic
+  testKeypadWiring();
 
   // Set initial display state
   setDisplayState(STATE_STANDBY);
@@ -233,6 +251,11 @@ void setDisplayState(DisplayState newState) {
 
 void initDisplayBlocking() {
   Serial.println("📺 Initializing Display (Blocking)...");
+  
+  // Explicitly configure VSPI with SCK=18, MOSI=23, and disable MISO (-1) and SS (-1).
+  // This prevents the SPI driver from claiming GPIO 19 (Row 1 of Keypad) and GPIO 5 (Flash Relay).
+  SPI.begin(18, -1, 23, -1);
+
   pinMode(TFT_RST, OUTPUT);
   digitalWrite(TFT_RST, HIGH);
   delay(10);
@@ -245,6 +268,159 @@ void initDisplayBlocking() {
   tft.setRotation(1);         
   tft.setTextWrap(false);     
   tft.fillScreen(ST77XX_BLACK);
+
+  // Guarantee GPIO 19 is fully released from SPI back to standard GPIO for the keypad matrix
+  gpio_reset_pin((gpio_num_t)19);
+  pinMode(19, INPUT_PULLUP);
+
+  // Guarantee FLASH_RELAY_PIN (GPIO 5) is released from SPI SS
+  pinMode(FLASH_RELAY_PIN, OUTPUT);
+  digitalWrite(FLASH_RELAY_PIN, HIGH); // Active-Low: HIGH = OFF
+}
+
+// Hardware Pin and Matrix Continuity Diagnostic
+void testKeypadWiring() {
+  Serial.println("\n🔍 ========================================");
+  Serial.println("     KEYPAD PIN & MATRIX DIAGNOSTIC       ");
+  Serial.println("==========================================");
+  Serial.printf("Rows (4): R0=GPIO%d, R1=GPIO%d, R2=GPIO%d, R3=GPIO%d\n", 
+                rowPins[0], rowPins[1], rowPins[2], rowPins[3]);
+  Serial.printf("Cols (4): C0=GPIO%d, C1=GPIO%d, C2=GPIO%d, C3=GPIO%d\n", 
+                colPins[0], colPins[1], colPins[2], colPins[3]);
+  
+  // 1. Verify idle pullup state on all 8 pins
+  for (byte r = 0; r < KEYPAD_ROWS; r++) {
+    pinMode(rowPins[r], INPUT_PULLUP);
+  }
+  for (byte c = 0; c < KEYPAD_COLS; c++) {
+    pinMode(colPins[c], INPUT_PULLUP);
+  }
+  delay(10);
+  
+  bool any_stuck = false;
+  for (byte r = 0; r < KEYPAD_ROWS; r++) {
+    if (digitalRead(rowPins[r]) == LOW) {
+      Serial.printf("⚠️  WARNING: Row %d (GPIO %d) is LOW when idle! (Short to GND or stuck key)\n", r, rowPins[r]);
+      any_stuck = true;
+    }
+  }
+  for (byte c = 0; c < KEYPAD_COLS; c++) {
+    if (digitalRead(colPins[c]) == LOW) {
+      Serial.printf("⚠️  WARNING: Col %d (GPIO %d) is LOW when idle! (Short to GND or stuck key)\n", c, colPins[c]);
+      any_stuck = true;
+    }
+  }
+  if (!any_stuck) {
+    Serial.println("✅ All 8 Keypad pins are idle HIGH (Pull-ups healthy).");
+  }
+
+  // 2. Perform raw matrix scan to see if any key is currently pressed
+  bool any_detected = false;
+  for (byte r = 0; r < KEYPAD_ROWS; r++) {
+    pinMode(rowPins[r], OUTPUT);
+    digitalWrite(rowPins[r], LOW);
+    delayMicroseconds(50);
+    
+    for (byte c = 0; c < KEYPAD_COLS; c++) {
+      if (digitalRead(colPins[c]) == LOW) {
+        Serial.printf("🔘 RAW DETECTED: Row %d (GPIO %d) <---> Col %d (GPIO %d) => Key '%c'\n", 
+                      r, rowPins[r], c, colPins[c], keys[r][c]);
+        any_detected = true;
+      }
+    }
+    pinMode(rowPins[r], INPUT_PULLUP);
+  }
+
+  if (!any_detected) {
+    Serial.println("ℹ️  No key currently held down. Keypad is ready for input.");
+  }
+  Serial.println("💡 Type 'TEST' in Serial Monitor anytime to re-run this diagnostic.");
+  Serial.println("==========================================\n");
+
+  // Restore all pins to INPUT_PULLUP for Keypad library
+  for (byte r = 0; r < KEYPAD_ROWS; r++) {
+    pinMode(rowPins[r], INPUT_PULLUP);
+  }
+  for (byte c = 0; c < KEYPAD_COLS; c++) {
+    pinMode(colPins[c], INPUT_PULLUP);
+  }
+}
+
+// Direct Hardware Matrix Scanner with 35us settling delay for ESP32 240MHz GPIO matrix
+char scanKeypadHardware() {
+  // Ensure all pins start in INPUT_PULLUP
+  for (byte r = 0; r < KEYPAD_ROWS; r++) pinMode(rowPins[r], INPUT_PULLUP);
+  for (byte c = 0; c < KEYPAD_COLS; c++) pinMode(colPins[c], INPUT_PULLUP);
+
+  // Pass 1: Standard Scan (Columns as OUTPUT LOW, Rows as INPUT_PULLUP)
+  for (byte c = 0; c < KEYPAD_COLS; c++) {
+    pinMode(colPins[c], OUTPUT);
+    digitalWrite(colPins[c], LOW);
+    delayMicroseconds(35); // Settling delay required for ESP32 GPIO capacitance
+
+    for (byte r = 0; r < KEYPAD_ROWS; r++) {
+      if (digitalRead(rowPins[r]) == LOW) {
+        delayMicroseconds(50); // Debounce confirmation read
+        if (digitalRead(rowPins[r]) == LOW) {
+          digitalWrite(colPins[c], HIGH);
+          pinMode(colPins[c], INPUT_PULLUP);
+          return keys[r][c];
+        }
+      }
+    }
+
+    digitalWrite(colPins[c], HIGH);
+    pinMode(colPins[c], INPUT_PULLUP);
+  }
+
+  // Pass 2: Inverted Scan (Rows as OUTPUT LOW, Columns as INPUT_PULLUP)
+  // Failsafe in case rows and columns are swapped in physical wiring
+  for (byte r = 0; r < KEYPAD_ROWS; r++) {
+    pinMode(rowPins[r], OUTPUT);
+    digitalWrite(rowPins[r], LOW);
+    delayMicroseconds(35);
+
+    for (byte c = 0; c < KEYPAD_COLS; c++) {
+      if (digitalRead(colPins[c]) == LOW) {
+        delayMicroseconds(50);
+        if (digitalRead(colPins[c]) == LOW) {
+          digitalWrite(rowPins[r], HIGH);
+          pinMode(rowPins[r], INPUT_PULLUP);
+          return keys[r][c];
+        }
+      }
+    }
+
+    digitalWrite(rowPins[r], HIGH);
+    pinMode(rowPins[r], INPUT_PULLUP);
+  }
+
+  return 0;
+}
+
+void checkKeypad() {
+  static char last_stable_key = 0;
+  static char last_raw_key = 0;
+  static unsigned long last_change_time = 0;
+
+  char current_key = scanKeypadHardware();
+
+  if (current_key != last_raw_key) {
+    last_raw_key = current_key;
+    last_change_time = millis();
+  }
+
+  if ((millis() - last_change_time) >= 30) { // 30ms stable debounce
+    if (current_key != last_stable_key) {
+      last_stable_key = current_key;
+      if (last_stable_key != 0) {
+        Serial.printf("🎛️ [KEYPAD PRESSED] Key: '%c' (code: %d)\n", last_stable_key, (int)last_stable_key);
+        handleKeypadInput(last_stable_key);
+      } else {
+        Serial.println("🎛️ [KEYPAD RELEASED]");
+      }
+    }
+  }
 }
 
 void drawHeader() {
@@ -692,7 +868,7 @@ void triggerFaceScan() {
 
 void handleKeypadInput(char key) {
   // Print keypress to Serial Monitor for debugging
-  Serial.print("🎛️ Keypad Input: ");
+  Serial.print("🎛️ Keypad Input Handled: ");
   Serial.println(key);
 
   if (key >= '0' && key <= '9') {
@@ -701,34 +877,56 @@ void handleKeypadInput(char key) {
       last_key_time = millis();
       last_key_masked = false;
       updateDisplay(false); 
+      Serial.printf("🔢 Current PIN Length: %d (Last entered: '%c')\n", entered_pin.length(), key);
     }
   } 
   else if (key == '#') {
+    Serial.println("🔑 Submit Key [#] Pressed");
     if (entered_pin.length() > 0) {
       if (authenticatePin(entered_pin)) {
+        Serial.println("✅ PIN Authorized!");
         unlockWithTimer();
         queuePinLog(entered_pin);
       } else {
+        Serial.println("❌ PIN Denied!");
         setDisplayState(STATE_DENIED);
         queuePinLog(entered_pin);
       }
       entered_pin = "";
       last_key_time = 0;
       last_key_masked = true;
+    } else {
+      Serial.println("⚠️ PIN is empty, submit ignored.");
     }
   } 
   else if (key == '*') {
+    Serial.println("🧹 Clear Key [*] Pressed");
     entered_pin = "";
     last_key_time = 0;
     last_key_masked = true;
     updateDisplay(false);
   }
   else if (key == 'A') {
+    Serial.println("📸 Face ID Key [A] Pressed");
     triggerFaceScan();
   }
   else if (key == 'B') {
+    Serial.println("👤 Face Enroll Key [B] Pressed");
     setDisplayState(STATE_ENROLLING);
     Serial2.println("FACE_ENROLL Keypad_User");
+  }
+  else if (key == 'C') {
+    Serial.println("⌫ Backspace Key [C] Pressed");
+    if (entered_pin.length() > 0) {
+      entered_pin.remove(entered_pin.length() - 1);
+      last_key_masked = true;
+      updateDisplay(false);
+      Serial.printf("🔢 PIN length after backspace: %d\n", entered_pin.length());
+    }
+  }
+  else if (key == 'D') {
+    Serial.println("🔒 Lock Key [D] Pressed");
+    lockDoor();
   }
 }
 
@@ -787,11 +985,8 @@ void loop() {
     toggleDoor();
   }
 
-  // 2. Scan Keypad sequentially (Runs every 10ms with zero lag)
-  char key = keypad.getKey();
-  if (key) {
-    handleKeypadInput(key);
-  }
+  // 2. Scan Keypad with hardware settling delay and bidirectional scanning
+  checkKeypad();
 
   // 3. Handle Face Scan Countdown
   if (current_display_state == STATE_COUNTDOWN) {
@@ -802,6 +997,7 @@ void loop() {
       digitalWrite(FLASH_RELAY_PIN, LOW);
       flash_active = true;
       flash_start_time = millis();
+      Serial.println("📡 [WROOM -> XIAO] Sending FACE_VERIFY over UART2 (GPIO 17)...");
       Serial2.println("FACE_VERIFY");
     }
   }
@@ -816,6 +1012,7 @@ void loop() {
   static unsigned long last_button_press = 0;
   if (digitalRead(BUTTON_PIN) == LOW) {
     if (millis() - last_button_press > 1000) {
+      Serial.println("🔘 Physical Exit Button Pressed (GPIO 12)");
       unlockWithTimer();
       last_button_press = millis();
     }
@@ -873,7 +1070,9 @@ void loop() {
   if (Serial.available()) {
     String input = Serial.readStringUntil('\n');
     input.trim();
-    if (input.startsWith("PIN ")) {
+    if (input.equalsIgnoreCase("TEST") || input.equalsIgnoreCase("SCAN") || input.equalsIgnoreCase("KEYPAD")) {
+      testKeypadWiring();
+    } else if (input.startsWith("PIN ")) {
       String pin = input.substring(4);
       if (authenticatePin(pin)) {
         unlockWithTimer();
@@ -888,12 +1087,25 @@ void loop() {
       String name = input.substring(7);
       setDisplayState(STATE_ENROLLING);
       Serial2.println("FACE_ENROLL " + name);
+    } else if (input.length() == 1) {
+      char k = input[0];
+      Serial.printf("⌨️ [SERIAL MOCK] Emulating Keypad Key: '%c'\n", k);
+      handleKeypadInput(k);
     }
   }
   
   // 9. UART response processing from XIAO ESP32S3 camera
   if (Serial2.available()) {
-    String resp = Serial2.readStringUntil('\n');
+    String raw_resp = Serial2.readStringUntil('\n');
+    
+    // Sanitize string: Strip non-printable binary framing noise
+    String resp = "";
+    for (size_t i = 0; i < raw_resp.length(); i++) {
+      char c = raw_resp[i];
+      if (c >= 32 && c <= 126) {
+        resp += c;
+      }
+    }
     resp.trim();
     
     if (resp.length() > 0) {

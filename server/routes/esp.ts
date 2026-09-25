@@ -81,7 +81,16 @@ app.post("/api/v1/sensor", async (c) => {
 // ---------------------------------------------------------------------------
 app.post("/api/v1/upload", async (c) => {
   const db = drizzle(c.env.DB, { schema });
-  const cameraId = Number(c.req.query("camera_id") ?? "0") || null;
+  const rawCameraId = Number(c.req.query("camera_id") ?? "0") || null;
+  let cameraId: number | null = null;
+  if (rawCameraId) {
+    const [cam] = await db
+      .select({ id: schema.cameras.id })
+      .from(schema.cameras)
+      .where(eq(schema.cameras.id, rawCameraId))
+      .limit(1);
+    if (cam) cameraId = cam.id;
+  }
   const motionDetected = c.req.query("motion") === "1";
 
   const body = await c.req.arrayBuffer();
@@ -331,6 +340,38 @@ app.post("/api/v1/face/enroll", async (c) => {
     user_id: name,
   });
 
+  // If user with this username exists in DB, ensure credentials table has this faceToken
+  const [dbUser] = await db
+    .select()
+    .from(schema.users)
+    .where(eq(schema.users.username, name))
+    .limit(1);
+  if (dbUser) {
+    const [existingCred] = await db
+      .select()
+      .from(schema.credentials)
+      .where(
+        and(
+          eq(schema.credentials.userId, dbUser.id),
+          eq(schema.credentials.credentialType, "FACE")
+        )
+      )
+      .limit(1);
+    if (existingCred) {
+      await db
+        .update(schema.credentials)
+        .set({ credentialValue: faceToken, active: true })
+        .where(eq(schema.credentials.id, existingCred.id));
+    } else {
+      await db.insert(schema.credentials).values({
+        userId: dbUser.id,
+        credentialType: "FACE",
+        credentialValue: faceToken,
+        active: true,
+      });
+    }
+  }
+
   return ok({ status: "enrolled", name });
 });
 
@@ -416,6 +457,7 @@ app.post("/api/v1/face/verify", async (c) => {
   let granted = false;
   let identifiedName = "Unknown";
   let matchedUserId: number | null = null;
+  let bestConfidence = results?.[0]?.confidence ?? 0;
 
   if (results?.length) {
     for (const match of results) {
@@ -448,7 +490,53 @@ app.post("/api/v1/face/verify", async (c) => {
         granted = true;
         identifiedName = matchedUser.name;
         matchedUserId = matchedUser.id;
+        bestConfidence = match.confidence;
         break; // found a valid active user, stop checking other matches
+      }
+    }
+  }
+
+  // Fallback: If Face++ search returned no results, compare against enrolled active users in D1
+  if (!granted) {
+    const faceCreds = await db
+      .select({
+        cred: schema.credentials,
+        user: schema.users,
+      })
+      .from(schema.credentials)
+      .innerJoin(schema.users, eq(schema.credentials.userId, schema.users.id))
+      .where(
+        and(
+          eq(schema.credentials.credentialType, "FACE"),
+          eq(schema.credentials.active, true),
+          eq(schema.users.status, "ACTIVE")
+        )
+      );
+
+    for (const item of faceCreds) {
+      const allowedMethods = JSON.parse(item.user.allowedAuthMethods ?? "[]");
+      if (!allowedMethods.includes("FACE")) continue;
+
+      try {
+        const comp = await facePlusPlus("compare", faceApiKey, faceApiSecret, {
+          image_base64_1: imageBase64,
+          face_token2: item.cred.credentialValue,
+        });
+
+        const conf = Number(comp.confidence ?? 0);
+        if (conf > bestConfidence) {
+          bestConfidence = conf;
+        }
+
+        if (conf >= threshold) {
+          granted = true;
+          identifiedName = item.user.name;
+          matchedUserId = item.user.id;
+          bestConfidence = conf;
+          break;
+        }
+      } catch (e) {
+        console.error("Fallback compare error for user:", item.user.username, e);
       }
     }
   }
@@ -465,7 +553,7 @@ app.post("/api/v1/face/verify", async (c) => {
     status: granted ? "AUTHORIZED" : "NOT_AUTHORIZED",
     message: granted ? "Authorized" : "Not authorized",
     name: identifiedName,
-    confidence: results?.[0]?.confidence ?? 0,
+    confidence: bestConfidence,
     ...imageRef,
   });
 });
